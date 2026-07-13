@@ -1,0 +1,13 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Environment / secrets
+.env
+
+# Live data store (created by the app at startup)
+links.json
+
+# Uploaded custom icons (user data)
+/icons/*
+!/icons/.gitkeep
