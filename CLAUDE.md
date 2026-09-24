@@ -101,10 +101,12 @@ A controls bar (`#viewControls`) below the header offers three segmented modes (
 - **By Category** — one `.category-section` per category (heading + count + grid); category order is first-appearance, with `Uncategorized` last.
 - **Filter** — reveals a row of category checkboxes (`#categoryFilters`); only checked categories render. All are checked by default (`state.selectedCategories`).
 
+The view (mode + checked filter categories) is persisted in `localStorage` under `linkBoard.view` by `saveViewState()` and restored after links load (`restoreViewState()`), so a reload returns to the same view.
+
 Categories are derived from each link's optional `category` field (string or array) via `getCategoriesOf()` (per-link list) / `getCategories()` (all distinct). A multi-category link appears in every one of its sections in By Category and matches if any of its categories is checked in Filter.
 
 ### Drag-to-reorder
-Each card has a dot-grid drag handle (`.drag-handle`, visible on card hover) at its right end. Only the handle is `draggable` (the card anchor is `draggable="false"`), so clicks still open the link. Dragging is confined to its own grid container (`state.dragOrigin`) — you reorder within a section, not across categories. Reordering uses a **swap-through** model: `setupCardDropTarget()` listens for `dragenter` on each card and, when the dragged card enters another card, moves it into that card's slot (before or after, based on their relative index) and pushes the other card back. Reacting on `dragenter` (once per card entry) rather than on every `dragover` avoids the jitter of continuously re-sorting by nearest center — after each move the dragged card lands under the pointer, so it can't immediately re-trigger and flip back. On drop, `persistOrder()` rebuilds `links.json` from the DOM order (merging in any filtered-out links at their original positions) and `PUT`s it.
+Each card has a dot-grid drag handle (`.drag-handle`, visible on card hover) at its right end. Only the handle is `draggable` (the card anchor is `draggable="false"`), so clicks still open the link. Dragging is confined to its own grid container (`state.dragOrigin`) — you reorder within a section, not across categories. Reordering uses a **swap-through** model: `setupCardDropTarget()` listens for `dragenter` on each card and, when the dragged card enters another card, moves it into that card's slot (before or after, based on their relative index) and pushes the other card back. Reacting on `dragenter` (once per card entry) rather than on every `dragover` avoids the jitter of continuously re-sorting by nearest center — after each move the dragged card lands under the pointer, so it can't immediately re-trigger and flip back. The drag ends via the idempotent `finishDrag()`, called from the handle's `dragend` and from document-level `drop`/`dragend` backstops (moving the dragged card in the DOM mid-drag means browsers may not fire `dragend` on it). `finishDrag()` calls `persistOrder()`, which rebuilds `links.json` from the DOM order (merging in any filtered-out links at their original positions) and `PUT`s it.
 
 ### Hover preview
 Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results cached in `state.previewCache`). Shows a popup with og:image, title, description, and URL. The popup is positioned right of the card, flipping left/above if it would overflow the viewport. **Not an iframe** — most sites send `X-Frame-Options: DENY`, so OG metadata was chosen instead.
@@ -126,7 +128,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 Cloudflare caches static assets aggressively when the origin sends no `Cache-Control` header. To prevent stale JS/CSS from being served after code changes:
 - `NoCacheMiddleware` adds `Cache-Control: no-store` to every response.
-- Static asset links in `index.html` include a `?v=N` query string (currently `?v=7`). **Increment this any time `app.js` or `style.css` is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
+- Static asset links in `index.html` include a `?v=N` query string (currently `?v=8`). **Increment this any time `app.js` or `style.css` is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
 
 ---
 
