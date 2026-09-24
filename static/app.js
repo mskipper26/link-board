@@ -263,16 +263,22 @@ function setupDragHandle(card, url) {
     } catch {}
   });
 
-  handle.addEventListener("dragend", () => {
-    card.classList.remove("dragging");
-    clearTimeout(state.hoverTimeout);
-    hidePreview();
-    if (state.dragUrl) {
-      state.dragUrl = null;
-      state.dragOrigin = null;
-      persistOrder();
-    }
-  });
+  handle.addEventListener("dragend", finishDrag);
+}
+
+// Ends a drag and saves the new order. Idempotent, and wired to several events
+// (handle `dragend`, document-level `drop`/`dragend`): swap-through reordering
+// moves the dragged card in the DOM mid-drag, and browsers don't reliably fire
+// `dragend` on a source node that has been moved, so any one of them may be
+// the only signal we get.
+function finishDrag() {
+  if (!state.dragUrl) return;
+  state.dragUrl = null;
+  state.dragOrigin = null;
+  document.querySelectorAll(".card.dragging").forEach((c) => c.classList.remove("dragging"));
+  clearTimeout(state.hoverTimeout);
+  hidePreview();
+  persistOrder();
 }
 
 // Allow drops anywhere in the origin grid so `dragend` fires cleanly, but the
@@ -357,6 +363,34 @@ async function persistOrder() {
 }
 
 // ─── View controls ────────────────────────────────────────────────────────────
+const VIEW_STORAGE_KEY = "linkBoard.view";
+
+// Remember the view (mode + filter selection) so a reload returns to it.
+function saveViewState() {
+  try {
+    localStorage.setItem(
+      VIEW_STORAGE_KEY,
+      JSON.stringify({
+        viewMode: state.viewMode,
+        selectedCategories: [...state.selectedCategories],
+      })
+    );
+  } catch {}
+}
+
+function restoreViewState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VIEW_STORAGE_KEY) || "null");
+    if (!saved) return;
+    if (["all", "grouped", "filter"].includes(saved.viewMode)) {
+      state.viewMode = saved.viewMode;
+    }
+    if (Array.isArray(saved.selectedCategories)) {
+      state.selectedCategories = new Set(saved.selectedCategories);
+    }
+  } catch {}
+}
+
 function setViewMode(mode) {
   state.viewMode = mode;
   document
@@ -369,6 +403,7 @@ function setViewMode(mode) {
   } else {
     filters.classList.add("hidden");
   }
+  saveViewState();
   renderGrid();
 }
 
@@ -392,6 +427,7 @@ function renderCategoryFilters() {
     cb.addEventListener("change", () => {
       if (cb.checked) state.selectedCategories.add(cat);
       else state.selectedCategories.delete(cat);
+      saveViewState();
       renderGrid();
     });
     label.appendChild(cb);
@@ -715,20 +751,26 @@ async function init() {
     if (e.target.id === "editOverlay") closeEditOverlay();
   });
 
+  // Backstops for finishDrag(); see its comment.
+  document.addEventListener("drop", finishDrag);
+  document.addEventListener("dragend", finishDrag);
+
+  // Load links, then render in the view the user last left (setViewMode renders).
+  const loadAndShow = async () => {
+    await loadLinks();
+    restoreViewState();
+    setViewMode(state.viewMode);
+    showApp();
+  };
+
   // Check existing session; if valid, load content directly
   try {
     await apiFetch("/api/auth/check");
     state.authenticated = true;
-    await loadLinks();
-    renderGrid();
-    showApp();
+    await loadAndShow();
   } catch {
     // Not authenticated — require passkey before showing anything
-    showAuthModal(async () => {
-      await loadLinks();
-      renderGrid();
-      showApp();
-    }, false);
+    showAuthModal(loadAndShow, false);
   }
 }
 
