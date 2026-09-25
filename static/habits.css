@@ -283,3 +283,41 @@ select.edit-input option { background: var(--surface); }
 .rec-val .muted { font-size: 11px; margin-right: 2px; }
 .record-item .remove-btn { margin-top: 0; }
 .empty-state.small { padding: 30px 10px; font-size: 13px; }
+
+/* ─── Calendar ────────────────────────────────────────────────────────────── */
+.habit-calendar { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.cal-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; }
+.cal-title { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.cal-nav {
+  width: 24px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cal-nav:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.cal-nav:disabled { opacity: .25; }
+
+.cal-grid { overflow: visible; font-family: inherit; }
+.cal-dow { font-size: 9px; fill: var(--text-dim); text-anchor: middle; }
+.cal-cell { fill: transparent; }
+.cal-day:hover .cal-cell { fill: var(--surface-2); }
+.cal-day.today .cal-cell { stroke: var(--text-dim); stroke-width: 1; }
+.cal-num { font-size: 10px; fill: var(--text-muted); text-anchor: middle; pointer-events: none; }
+.cal-day.today .cal-num { fill: var(--text); font-weight: 700; }
+.cal-day.future .cal-num { fill: var(--border); }
+
+.bubble {
+  fill: var(--c);
+  fill-opacity: .32;
+  stroke: var(--c);
+  stroke-opacity: .75;
+  stroke-width: 1;
+  transition: opacity .15s;
+}
+.habit-calendar.isolating .bubble:not(.iso) { opacity: 0; }

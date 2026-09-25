@@ -205,9 +205,94 @@ const Habits = (() => {
   }
 
   // ─── Calendar ───────────────────────────────────────────────────────────────
-  function renderCalendar(row, name) {}
+  // Month grid with one bubble per goal per day. A bubble's area is that day's
+  // value relative to the goal's best day in the displayed month (a minimum
+  // radius keeps small non-zero days visible; zero/no data draws nothing).
+  // Larger bubbles are drawn first so smaller ones stay on top.
+  function renderCalendar(row, name) {
+    const el = row.querySelector(".habit-calendar");
+    const habit = hs.habits[name];
+    const records = hs.records[name] || [];
+    const today = H.todayKey();
+    const cur = { y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) - 1 };
+    const { y, m } = hs.calMonth[name] || cur;
+    const atCurrent = y === cur.y && m === cur.m;
 
-  function isolateGoal(row, gi) {}
+    const weeks = H.monthGrid(y, m);
+    const days = weeks.flat().filter(Boolean);
+    const series = habit.goals.map((goal, gi) => {
+      const vals = H.dailyValues(goal, habit, records, days);
+      const best = Math.max(0, ...vals.filter((v) => v !== null));
+      return { goal, gi, vals, best };
+    });
+    const counts = new Map();
+    for (const r of records) {
+      const d = H.recordDay(r);
+      counts.set(d, (counts.get(d) || 0) + 1);
+    }
+
+    const C = 32, TOP = 18, MAX_R = C / 2 - 1.5, MIN_R = 2.5;
+    const W = 7 * C, HT = TOP + weeks.length * C;
+    let svg = DAY_INITIALS.map((l, i) => `<text x="${i * C + C / 2}" y="11" class="cal-dow">${l}</text>`).join("");
+    let di = 0;
+    weeks.forEach((week, wi) =>
+      week.forEach((d, col) => {
+        if (!d) return;
+        const idx = di++;
+        const cx = col * C + C / 2;
+        const cy = TOP + wi * C + C / 2;
+        const bubbles = series
+          .map((s) => {
+            const v = s.vals[idx];
+            if (v === null || v <= 0 || s.best <= 0) return null;
+            return { r: Math.max(MIN_R, MAX_R * Math.sqrt(v / s.best)), s };
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.r - a.r);
+        const lines = [prettyDay(d)];
+        const n = counts.get(d) || 0;
+        lines.push(`${n} record${n === 1 ? "" : "s"}`);
+        if (n) for (const s of series) lines.push(`${H.goalLabel(s.goal, habit)}: ${H.formatValue(s.goal, habit, s.vals[idx])}`);
+        svg += `<g class="cal-day${d === today ? " today" : ""}${d > today ? " future" : ""}">
+          <title>${esc(lines.join("\n"))}</title>
+          <rect x="${col * C + 1}" y="${TOP + wi * C + 1}" width="${C - 2}" height="${C - 2}" rx="6" class="cal-cell"/>
+          ${bubbles
+            .map(({ r, s }) => `<circle class="bubble" data-gi="${s.gi}" cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" style="--c:${esc(s.goal.color)}"/>`)
+            .join("")}
+          <text x="${cx}" y="${cy + 3.5}" class="cal-num">${Number(d.slice(8))}</text>
+        </g>`;
+      })
+    );
+
+    el.innerHTML = `
+      <div class="cal-head">
+        <button class="cal-nav" data-dir="-1" aria-label="Previous month">‹</button>
+        <span class="cal-title">${H.MONTHS[m]} ${y}</span>
+        <button class="cal-nav" data-dir="1" aria-label="Next month"${atCurrent ? " disabled" : ""}>›</button>
+      </div>
+      <svg class="cal-grid" viewBox="0 0 ${W} ${HT}" width="${W}" height="${HT}">${svg}</svg>`;
+
+    el.querySelectorAll(".cal-nav").forEach((b) =>
+      b.addEventListener("click", () => {
+        let nm = m + Number(b.dataset.dir), ny = y;
+        if (nm < 0) (nm = 11), ny--;
+        if (nm > 11) (nm = 0), ny++;
+        if (ny > cur.y || (ny === cur.y && nm > cur.m)) return;
+        hs.calMonth[name] = { y: ny, m: nm };
+        renderCalendar(row, name);
+      })
+    );
+  }
+
+  // Show only goal `gi`'s bubbles (null restores all). Class toggles only.
+  function isolateGoal(row, gi) {
+    if (!row) return;
+    const cal = row.querySelector(".habit-calendar");
+    cal.classList.toggle("isolating", gi !== null);
+    cal.querySelectorAll(".bubble").forEach((b) =>
+      b.classList.toggle("iso", gi !== null && b.dataset.gi === String(gi))
+    );
+  }
 
   // ─── Goal detail ────────────────────────────────────────────────────────────
   function openGoalDetail(name, gi) {}
