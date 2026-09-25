@@ -1,8 +1,8 @@
 # PROJECT: WEB LINK BOARD
-A simple app for quickly accessing important links for personal use.
+A simple app for quickly accessing important links for personal use, plus a habit tracker page.
 
 ## Overview
-Single-page web app with a responsive grid of link cards. Each card shows an icon, site name, and optional description. Hovering a card shows a preview popup (OG metadata: title, description, og:image). Clicking opens the link in a new tab. An Edit button in the top-right opens an overlay panel for managing links.
+Single-page web app with a responsive grid of link cards. Each card shows an icon, site name, and optional description. Hovering a card shows a preview popup (OG metadata: title, description, og:image). Clicking opens the link in a new tab. An Edit button in the top-right opens an overlay panel for managing links. A **Links | Habits** tab switch in the header swaps to the habit tracker (see *Habits* below).
 
 The entire app is behind a passkey gate — the grid and header are hidden on load and only revealed after successful authentication. Sessions persist for 7 days via a signed cookie.
 
@@ -20,18 +20,35 @@ The entire app is behind a passkey gate — the grid and header are hidden on lo
 The project lives at the path configured in `.env` as `LINK_BOARD_DIR`:
 ```
 <LINK_BOARD_DIR>/
-├── main.py               # FastAPI app (all backend logic)
+├── main.py               # FastAPI app (links/auth logic + thin habit endpoints)
+├── habit_store.py        # Habit storage & validation (FastAPI-free, unit-tested)
 ├── requirements.txt
+├── requirements-dev.txt  # pytest
 ├── start.sh              # Entrypoint for systemd service
 ├── .env                  # Passkey, secret key, paths & URL (not in version control; see .env.example)
 ├── links.json            # Live data store
+├── habits.json           # Habit config (not in version control)
+├── habits/               # One CSV of records per habit; .trash/ holds deleted/backed-up CSVs
 ├── icons/                # Uploaded custom icons
+├── tests/
+│   ├── conftest.py            # Points main.py at a temp LINK_BOARD_DIR before import
+│   ├── test_habits_api.py     # pytest: habit API
+│   └── habit-math.test.js     # node --test: habit-math.js
 └── static/
     ├── index.html
     ├── style.css
-    ├── app.js
+    ├── app.js            # Links page, auth, page tabs
+    ├── habit-math.js     # DOM-free habit math (UMD: browser global HabitMath + Node)
+    ├── habits.js         # Habits page UI
+    ├── habits.css
     ├── favicon.svg
     └── icon-default.svg  # Fallback icon when favicon unavailable
+```
+
+### Tests
+```bash
+python3 -m pytest tests/      # API (uses a throwaway dir + passkey, never live data)
+node --test tests/            # habit-math.js
 ```
 
 ### Service Management
@@ -55,6 +72,14 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
 | GET | `/api/links` | ✓ | Returns `links.json` contents |
 | PUT | `/api/links` | ✓ | Overwrites `links.json` (atomic write) |
 | POST | `/api/icon` | ✓ | Uploads a custom icon to `icons/`; returns web path |
+| GET | `/api/habits` | ✓ | `{habits: <config>, records: {name: [{ts, values}]}}` |
+| POST | `/api/habits` | ✓ | Create habit (`name`, `type`, `occurs`, `metrics`, `goals`) + empty CSV |
+| PUT | `/api/habits/order` | ✓ | `{order: [names]}` → rewrite key order (declared before `/{name}`) |
+| PUT | `/api/habits/{name}` | ✓ | Replace config; optional `newName` (renames CSV); metrics may carry `was` to rename a column |
+| DELETE | `/api/habits/{name}` | ✓ | Remove habit; CSV → `habits/.trash/<slug>-<stamp>.csv` |
+| POST | `/api/habits/{name}/records` | ✓ | Add `{ts, values, replace?}`; daily habit + day taken → 409 unless `replace` |
+| PUT | `/api/habits/{name}/records/{idx}` | ✓ | Edit record by CSV row index; body `expectedTs` must match (else 409) |
+| DELETE | `/api/habits/{name}/records/{idx}?ts=` | ✓ | Delete record; `ts` must match (else 409) |
 | GET | `/api/favicon?url=` | — | Proxies favicon from Google's favicon service |
 | GET | `/api/preview?url=` | — | Fetches OG metadata (title, description, og:image) from a URL |
 | GET | `/icons/{filename}` | — | Serves uploaded icons (StaticFiles mount) |
@@ -86,14 +111,42 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
 ```
 All fields are optional. If `name` is absent, the frontend derives it from the URL hostname. If `icon` is absent, the favicon proxy is used at display time. **`category` may be a single string or an array of strings** — a link with multiple categories is sorted into all of them (shown once per section in By Category, and matched by any of them in Filter). The edit overlay accepts categories comma-separated and saves a bare string for one, an array for several. If `category` is absent/empty, the link is treated as `Uncategorized`. **Key order in the JSON is the display order** — the drag-to-reorder feature rewrites the object with keys in the new order.
 
-**Atomic writes**: `save_links()` writes to `links.tmp` then renames to `links.json`, preventing partial reads.
+**Atomic writes**: `atomic_write(path, text)` (in `habit_store.py`) writes to `<name>.tmp` then renames over the target, preventing partial reads. Used for `links.json`, `habits.json`, and CSV rewrites (new records are plain appends).
+
+**`habits.json`** — habit config; key = display name (unique case-insensitively, no `/`, not `order`); key order = display order:
+```json
+{
+  "Morning Run": {
+    "type": "POSITIVE",
+    "occurs": "periodic",
+    "metrics": [
+      {"name": "Distance", "kind": "number",   "unit": "mi"},
+      {"name": "Time",     "kind": "duration", "unit": ""}
+    ],
+    "goals": [
+      {"period": "week", "type": "raw",   "metric1": "Distance", "agg": "sum", "target": 15, "color": "#58a6ff"},
+      {"period": "day",  "type": "ratio", "metric1": "Time", "metric2": "Distance", "target": 540, "color": "#3fb950"}
+    ],
+    "slug": "morning-run"
+  }
+}
+```
+- `type` POSITIVE (goals met when value `>=` target) / NEGATIVE (`<=`) — the default for each goal. A goal may override it with optional `direction` `atLeast` / `atMost` (omitted = follow the habit type; `HabitMath.goalDirection`). Empty periods count as met for `atMost` goals, not met for `atLeast`. `occurs` daily (one record per local day) / periodic.
+- Metric `kind` number / duration (seconds; entered H:MM:SS). `count` (records in period) is a built-in metric; `count`/`timestamp` are reserved names.
+- Goal `period` day/week/month/year/all; `type` raw (with `agg` sum/avg/max/min, omitted for `count`) or ratio (`sum(metric1)/sum(metric2)`). `target` is stored in raw units (seconds for durations, per-second for number÷duration rates).
+- `slug` is server-managed (assigned on create/rename, numeric suffix on collision, stripped from `GET /api/habits`) and names the CSV, so reordering never changes which file belongs to a habit.
+
+**`habits/<slug>.csv`** — header `timestamp,<metric names…>`, one row per record. `timestamp` is browser-local ISO with offset (`2026-09-25T14:30:00-04:00`); all bucketing uses its date part (`ts[:10]`), so the server needs no timezone logic. Timestamps more than 5 min in the future are rejected. Renaming a metric rewrites the header; removing one copies the CSV to `.trash/` first.
 
 ---
 
 ## Frontend Behaviour
 
 ### Auth gate
-Header, view controls, and grid start with CSS class `hidden` (`display: none !important`). `showApp()` removes `hidden` from all three after the auth check passes.
+Header, view controls, and grid start with CSS class `hidden` (`display: none !important`). `showApp()` reveals the header and calls `setPage()`, which reveals the current page's content after the auth check passes.
+
+### Pages (Links | Habits)
+Segmented tabs in the header (`.page-tabs`). `setPage()` swaps `#viewControls`/`#linkGrid`/`#editBtn` (Links) for `#habitBoard`/`#addHabitBtn` (Habits). The page is kept in the URL hash (`#habits`) and `localStorage` (`linkBoard.page`). Habit data is fetched the first time the Habits tab is shown (`Habits.show()`).
 
 ### View modes
 A controls bar (`#viewControls`) below the header offers three segmented modes (`state.viewMode`):
@@ -117,6 +170,16 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 - Favicon auto-updates when the URL field loses focus (if no custom icon is set).
 - Save does a `PUT /api/links` with the collected state; on success updates `state.links` and re-renders the grid.
 
+### Habits page (`habits.js`, math in `habit-math.js`)
+- **Rows** (`.habit-row`): info (name, badges, metrics, + Record / Records / ✎) | goal stack | calendar | drag handle. Below 900px the row stacks (info → goals → calendar) with the handle top-right.
+- **Goal cell**: label, MET/NOT MET for the current period so far, streak (consecutive *completed* periods met, walking back to the earliest record's period; empty periods count as met for “at most” goals, not met for “at least”; none for all-time), and 7 Sun–Sat bars of this week's daily values (no-data days are gaps). A progress bar along the bottom (`progressBar()`, model `HabitMath.goalProgress`) shows the current period's value vs target: “at least” fills toward the target (“N to go” / “+N beyond”); “at most” fills as the limit is used (“N left”), turns amber at ≥85%, and once over rescales to the value with the limit marked and the excess red (“N over”). For sum/count goals over week/month/year a tick marks how much of the period has elapsed (hidden once an “at least” goal is met). Click → detail overlay; hover → isolates that goal's calendar bubbles (class toggle).
+- **Calendar**: per-habit month (in memory; › disabled at the current month). One bubble per goal per day, area relative to that goal's best day in the month, larger drawn first.
+- **Detail overlay**: Week/Month (daily bars), Year (weekly), All (monthly), clipped to the first record. In-progress bucket drawn lighter and excluded from the least-squares trend (needs ≥2 complete buckets); trend projected ~25% forward. Target line: direct for avg/max/min/ratio; for sum/count, exact when bucket = goal period, else prorated "pace"; none for all-time sums.
+- **Menus** open in `#habitOverlay` (z 500), or `#habitDialog` (z 600) when opened from another menu. Escape closes the topmost. After any change the page re-fetches `/api/habits` and redraws (open menus refresh themselves).
+- **Record form**: `datetime-local` (default now, max now) + one required input per metric; for daily habits a notice appears when the day already has a record, and saving replaces it.
+- **Drag reorder**: same swap-through model as links, with its own state (`hs.dragName`); persisted via `PUT /api/habits/order`.
+- **Ratio display** (`HabitMath.displayScale`): duration÷number → pace (`9:00 /mi`), number÷duration → per hour (`mi/h`), duration÷duration → unitless. Goal target inputs use the same display units.
+
 ### Icon handling
 1. If the link has a custom `icon` path → served from `/icons/`
 2. Otherwise → `/api/favicon?url=...` (proxied from `https://www.google.com/s2/favicons?domain=...&sz=64`)
@@ -128,7 +191,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 Cloudflare caches static assets aggressively when the origin sends no `Cache-Control` header. To prevent stale JS/CSS from being served after code changes:
 - `NoCacheMiddleware` adds `Cache-Control: no-store` to every response.
-- Static asset links in `index.html` include a `?v=N` query string (currently `?v=8`). **Increment this any time `app.js` or `style.css` is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
+- Static asset links in `index.html` include a `?v=N` query string (currently `?v=11`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
 
 ---
 

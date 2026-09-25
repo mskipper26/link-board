@@ -5,13 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Link Board</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=11">
+  <link rel="stylesheet" href="/static/habits.css?v=11">
 </head>
 <body>
 
   <header id="appHeader" class="header hidden">
-    <h1 class="header-title">Link Board</h1>
+    <div class="header-left">
+      <h1 class="header-title">Link Board</h1>
+      <div class="view-modes page-tabs" role="tablist">
+        <button class="view-mode-btn active" data-page="links" role="tab">Links</button>
+        <button class="view-mode-btn" data-page="habits" role="tab">Habits</button>
+      </div>
+    </div>
     <button id="editBtn" class="btn-edit">Edit</button>
+    <button id="addHabitBtn" class="btn-edit hidden">+ Add Habit</button>
   </header>
 
   <nav id="viewControls" class="view-controls hidden">
@@ -24,6 +32,8 @@
   </nav>
 
   <main id="linkGrid" class="board hidden"></main>
+
+  <main id="habitBoard" class="habit-board hidden"></main>
 
   <datalist id="categoryOptions"></datalist>
 
@@ -74,6 +84,16 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=8"></script>
+  <!-- Habit menus: a shared overlay plus a dialog stacked above it -->
+  <div id="habitOverlay" class="overlay-backdrop hidden">
+    <div class="overlay-panel"></div>
+  </div>
+  <div id="habitDialog" class="overlay-backdrop habit-dialog hidden">
+    <div class="overlay-panel"></div>
+  </div>
+
+  <script src="/static/habit-math.js?v=11"></script>
+  <script src="/static/app.js?v=11"></script>
+  <script src="/static/habits.js?v=11"></script>
 </body>
 </html>

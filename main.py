@@ -15,6 +15,8 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import aiofiles
 from dotenv import load_dotenv
 
+from habit_store import HabitStore, HabitError, atomic_write
+
 load_dotenv()
 
 BASE_DIR = Path(os.environ.get("LINK_BOARD_DIR") or Path(__file__).resolve().parent)
@@ -23,6 +25,7 @@ ICONS_DIR = BASE_DIR / "icons"
 STATIC_DIR = BASE_DIR / "static"
 
 ICONS_DIR.mkdir(exist_ok=True)
+habits = HabitStore(BASE_DIR)
 
 PASSKEY = os.environ["LINK_BOARD_PASSKEY"]
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -54,9 +57,7 @@ def load_links() -> dict:
 
 
 def save_links(links: dict):
-    tmp = LINKS_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(links, indent=2, ensure_ascii=False))
-    tmp.rename(LINKS_FILE)
+    atomic_write(LINKS_FILE, json.dumps(links, indent=2, ensure_ascii=False))
 
 
 def is_authenticated(request: Request) -> bool:
@@ -145,6 +146,76 @@ async def upload_icon(request: Request, file: UploadFile = File(...)):
     async with aiofiles.open(dest, "wb") as f:
         await f.write(content)
     return {"path": f"/icons/{filename}"}
+
+
+# ─── Habits ────────────────────────────────────────────────────────────────
+# Thin wrappers over HabitStore; HabitError carries the HTTP status.
+
+async def json_body(request: Request):
+    try:
+        return await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+
+def habit_call(fn, *args):
+    try:
+        return fn(*args)
+    except HabitError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+
+
+@app.get("/api/habits")
+async def get_habits(request: Request):
+    require_auth(request)
+    return habits.all_data()
+
+
+@app.post("/api/habits")
+async def create_habit(request: Request):
+    require_auth(request)
+    return habit_call(habits.create, await json_body(request))
+
+
+# Declared before the /{name} routes so "order" isn't taken as a habit name.
+@app.put("/api/habits/order")
+async def reorder_habits(request: Request):
+    require_auth(request)
+    body = await json_body(request)
+    habit_call(habits.reorder, body.get("order") if isinstance(body, dict) else None)
+    return {"ok": True}
+
+
+@app.put("/api/habits/{name}")
+async def update_habit(name: str, request: Request):
+    require_auth(request)
+    return habit_call(habits.update, name, await json_body(request))
+
+
+@app.delete("/api/habits/{name}")
+async def delete_habit(name: str, request: Request):
+    require_auth(request)
+    habit_call(habits.delete, name)
+    return {"ok": True}
+
+
+@app.post("/api/habits/{name}/records")
+async def add_record(name: str, request: Request):
+    require_auth(request)
+    return habit_call(habits.add_record, name, await json_body(request))
+
+
+@app.put("/api/habits/{name}/records/{idx}")
+async def update_record(name: str, idx: int, request: Request):
+    require_auth(request)
+    return habit_call(habits.update_record, name, idx, await json_body(request))
+
+
+@app.delete("/api/habits/{name}/records/{idx}")
+async def delete_record(name: str, idx: int, ts: str, request: Request):
+    require_auth(request)
+    habit_call(habits.delete_record, name, idx, ts)
+    return {"ok": True}
 
 
 @app.get("/api/favicon")

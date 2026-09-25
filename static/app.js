@@ -9,6 +9,7 @@ const state = {
   selectedCategories: new Set(),
   dragUrl: null,
   dragOrigin: null,
+  page: "links", // "links" | "habits"
 };
 
 const UNCATEGORIZED = "Uncategorized";
@@ -394,7 +395,7 @@ function restoreViewState() {
 function setViewMode(mode) {
   state.viewMode = mode;
   document
-    .querySelectorAll(".view-mode-btn")
+    .querySelectorAll(".view-mode-btn[data-mode]")
     .forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
   const filters = document.getElementById("categoryFilters");
   if (mode === "filter") {
@@ -716,10 +717,49 @@ async function onSave() {
   }
 }
 
+// ─── Pages (Links | Habits) ───────────────────────────────────────────────────
+// Client-side tab swap. The page lives in the URL hash (#habits) so a reload or
+// bookmark lands on it; localStorage covers a bare URL.
+const PAGE_STORAGE_KEY = "linkBoard.page";
+
+function initialPage() {
+  if (location.hash === "#habits") return "habits";
+  if (location.hash === "#links") return "links";
+  try {
+    return localStorage.getItem(PAGE_STORAGE_KEY) === "habits" ? "habits" : "links";
+  } catch {
+    return "links";
+  }
+}
+
+function setPage(page) {
+  state.page = page;
+  const habits = page === "habits";
+  document
+    .querySelectorAll(".page-tabs .view-mode-btn")
+    .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+  try {
+    localStorage.setItem(PAGE_STORAGE_KEY, page);
+  } catch {}
+  const hash = habits ? "#habits" : "";
+  if (location.hash !== hash) {
+    history.replaceState(null, "", location.pathname + location.search + hash);
+  }
+  // Only touch the content areas once auth has revealed the app.
+  if (document.getElementById("appHeader").classList.contains("hidden")) return;
+  document.getElementById("editBtn").classList.toggle("hidden", habits);
+  document.getElementById("addHabitBtn").classList.toggle("hidden", !habits);
+  document.getElementById("viewControls").classList.toggle("hidden", habits);
+  document.getElementById("linkGrid").classList.toggle("hidden", habits);
+  document.getElementById("habitBoard").classList.toggle("hidden", !habits);
+  clearTimeout(state.hoverTimeout);
+  hidePreview();
+  if (habits) Habits.show();
+}
+
 function showApp() {
   document.getElementById("appHeader").classList.remove("hidden");
-  document.getElementById("viewControls").classList.remove("hidden");
-  document.getElementById("linkGrid").classList.remove("hidden");
+  setPage(state.page);
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -728,9 +768,17 @@ async function init() {
   document.getElementById("editBtn").addEventListener("click", onEditButtonClick);
   document.getElementById("addLinkBtn").addEventListener("click", addNewLink);
 
-  document.querySelectorAll(".view-mode-btn").forEach((btn) => {
+  document.querySelectorAll(".view-modes:not(.page-tabs) .view-mode-btn").forEach((btn) => {
     btn.addEventListener("click", () => setViewMode(btn.dataset.mode));
   });
+  document.querySelectorAll(".page-tabs .view-mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setPage(btn.dataset.page));
+  });
+  window.addEventListener("hashchange", () => {
+    const page = location.hash === "#habits" ? "habits" : "links";
+    if (page !== state.page) setPage(page);
+  });
+  state.page = initialPage();
   document.getElementById("saveBtn").addEventListener("click", onSave);
   document.getElementById("cancelEditBtn").addEventListener("click", closeEditOverlay);
   document.getElementById("authSubmitBtn").addEventListener("click", submitAuth);
