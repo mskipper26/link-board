@@ -42,6 +42,16 @@ html, body {
   z-index: 10;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+}
+
+.page-tabs { align-self: center; }
+.page-tabs .view-mode-btn { padding: 4px 14px; }
+
 .header-title {
   font-size: 18px;
   font-weight: 600;

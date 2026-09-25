@@ -11,3 +11,8 @@ links.json
 # Uploaded custom icons (user data)
 /icons/*
 !/icons/.gitkeep
+
+# Habit tracker data (config + per-habit CSVs)
+habits.json
+/habits/*
+!/habits/.gitkeep
