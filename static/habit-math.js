@@ -158,11 +158,18 @@
     return Math.min(...vals);
   }
 
-  // No value counts as success for NEGATIVE habits (nothing bad happened) and
-  // failure for POSITIVE ones.
-  function isMet(type, value, target) {
-    if (value === null || value === undefined) return type === "NEGATIVE";
-    return type === "NEGATIVE" ? value <= target : value >= target;
+  // "atLeast" (value >= target) or "atMost" (value <= target). A goal may set
+  // its own direction; otherwise it follows the habit type.
+  function goalDirection(goal, habit) {
+    if (goal.direction === "atLeast" || goal.direction === "atMost") return goal.direction;
+    return habit.type === "NEGATIVE" ? "atMost" : "atLeast";
+  }
+
+  // No value counts as success for "at most" goals (nothing happened) and
+  // failure for "at least" ones.
+  function isMet(dir, value, target) {
+    if (value === null || value === undefined) return dir === "atMost";
+    return dir === "atMost" ? value <= target : value >= target;
   }
 
   // Per-day values for the given day keys; null for days with no records.
@@ -176,7 +183,7 @@
     const pk = periodKey(goal.period, today);
     const inPeriod = records.filter((r) => periodKey(goal.period, recordDay(r)) === pk);
     const value = aggregate(goal, habit, inPeriod);
-    return { value, met: isMet(habit.type, value, goal.target) };
+    return { value, met: isMet(goalDirection(goal, habit), value, goal.target) };
   }
 
   function earliestDay(records) {
@@ -190,7 +197,7 @@
 
   // Consecutive completed periods met, counting back from the one before the
   // current period and stopping at the period of the habit's earliest record.
-  // Empty periods count normally (met for NEGATIVE, not for POSITIVE).
+  // Empty periods count normally (met for "at most", not for "at least").
   // Returns null for all-time goals.
   function streak(goal, habit, records, today) {
     if (goal.period === "all") return null;
@@ -198,11 +205,12 @@
     if (first === null) return 0;
     const firstKey = periodKey(goal.period, first);
     const groups = groupByPeriod(goal.period, records);
+    const dir = goalDirection(goal, habit);
     let pk = prevPeriod(goal.period, periodKey(goal.period, today));
     let n = 0;
     while (pk >= firstKey) {
       const value = aggregate(goal, habit, groups.get(pk) || []);
-      if (!isMet(habit.type, value, goal.target)) break;
+      if (!isMet(dir, value, goal.target)) break;
       n++;
       pk = prevPeriod(goal.period, pk);
     }
@@ -360,7 +368,7 @@
     const what = goal.type === "ratio"
       ? `${goal.metric1} / ${goal.metric2}`
       : goal.metric1 === "count" ? "count" : `${goal.metric1} · ${goal.agg || "sum"}`;
-    const cmp = habit.type === "NEGATIVE" ? "≤" : "≥";
+    const cmp = goalDirection(goal, habit) === "atMost" ? "≤" : "≥";
     const period = goal.period === "all" ? "all-time" : goal.period;
     return `${what} · ${period} ${cmp} ${formatValue(goal, habit, goal.target)}`;
   }
@@ -372,7 +380,7 @@
     if (goal.type === "ratio") what = `${adj} ${goal.metric1} per ${goal.metric2}`;
     else if (goal.metric1 === "count") what = `${adj} number of records`;
     else what = `${adj} ${AGG_LABEL[goal.agg || "sum"]} of ${goal.metric1}`;
-    const cmp = habit.type === "NEGATIVE" ? "≤" : "≥";
+    const cmp = goalDirection(goal, habit) === "atMost" ? "≤" : "≥";
     return `Met when ${what} ${cmp} ${formatValue(goal, habit, goal.target)}`;
   }
 
@@ -384,7 +392,7 @@
   return {
     parseDay, dayKey, addDays, daysBetween, todayKey, dayOfWeek, recordDay,
     weekStart, periodKey, periodStart, periodEnd, prevPeriod, nextPeriod, groupByPeriod,
-    metricInfo, aggregate, isMet, dailyValues, currentStatus, earliestDay, streak,
+    metricInfo, aggregate, goalDirection, isMet, dailyValues, currentStatus, earliestDay, streak,
     monthGrid, linearTrend, detailBuckets, targetLine,
     formatDuration, parseDuration, formatNumber, displayScale, formatValue, formatMetric,
     unitLabel, goalLabel, goalSentence, streakLabel, MONTHS,

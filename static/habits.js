@@ -650,7 +650,7 @@ const Habits = (() => {
       const pos = segValue(panel, "type") === "POSITIVE";
       const daily = segValue(panel, "occurs") === "daily";
       hint.textContent =
-        (pos ? "Positive: goals are met at or above their target. " : "Negative: goals are met at or below their target; periods with no records count as met. ") +
+        (pos ? "Positive: goals are met at or above their target by default. " : "Negative: goals are met at or below their target by default; periods with no records count as met. ") +
         (daily ? "Daily: at most one record per day." : "Periodic: any number of records per day.");
     };
     wireSegs(panel, updateHint);
@@ -773,6 +773,11 @@ const Habits = (() => {
           ${field("Divided by", `<select class="edit-input g-m2">${metricOptions(habit, goal.metric2 || "count")}</select>`, "g-m2-field")}
           ${field("Aggregate", `<select class="edit-input g-agg">${AGG_OPTS.map(([v, l]) => `<option value="${v}"${v === (goal.agg || "sum") ? " selected" : ""}>${l}</option>`).join("")}</select>`, "g-agg-field")}
         </div>
+        ${field("Direction", seg("gdir", [
+          ["auto", `Habit default (${habit.type === "NEGATIVE" ? "≤" : "≥"})`],
+          ["atLeast", "At least (≥)"],
+          ["atMost", "At most (≤)"],
+        ], goal.direction || "auto"))}
         ${field("Target", `<div class="target-wrap"><input class="edit-input g-target"><span class="target-unit"></span></div>`)}
         <div class="hfield">
           <span class="hfield-label">Color</span>
@@ -801,6 +806,8 @@ const Habits = (() => {
       const g = { period: segValue(panel, "period"), type: segValue(panel, "gtype"), metric1: m1.value, color };
       if (g.type === "ratio") g.metric2 = m2.value;
       else if (g.metric1 !== "count") g.agg = agg.value;
+      const dir = segValue(panel, "gdir");
+      if (dir !== "auto") g.direction = dir;
       g.target = inputToTarget(target.value, g, habit);
       return g;
     };

@@ -24,6 +24,7 @@ METRIC_KINDS = {"number", "duration"}
 PERIODS = {"day", "week", "month", "year", "all"}
 GOAL_TYPES = {"raw", "ratio"}
 AGGS = {"sum", "avg", "max", "min"}
+DIRECTIONS = {"atLeast", "atMost"}
 RESERVED_METRICS = {"count", "timestamp"}
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_NAME_LEN = 60
@@ -138,6 +139,12 @@ def validate_goals(raw, metrics: list) -> list:
                 bad("Goal aggregation is invalid")
             goal["agg"] = agg
         goal["target"] = _number(g.get("target"), "Goal target")
+        # Optional; when absent the goal follows the habit type.
+        direction = g.get("direction")
+        if direction not in (None, "", "auto"):
+            if direction not in DIRECTIONS:
+                bad("Goal direction must be atLeast or atMost")
+            goal["direction"] = direction
         color = g.get("color", "")
         if not isinstance(color, str) or not COLOR_RE.match(color):
             bad("Goal color must be #rrggbb")

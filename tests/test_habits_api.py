@@ -106,6 +106,16 @@ def test_count_goal_drops_agg(client):
     assert "agg" not in data(client)["habits"]["Water"]["goals"][0]
 
 
+def test_goal_direction_optional(client):
+    base = {"period": "day", "type": "raw", "metric1": "count", "target": 8, "color": "#ffffff"}
+    goals = [base, {**base, "direction": "auto"}, {**base, "direction": "atMost"}]
+    assert client.post("/api/habits", json={**WATER, "goals": goals}).status_code == 200
+    saved = data(client)["habits"]["Water"]["goals"]
+    assert [g.get("direction") for g in saved] == [None, None, "atMost"]
+    bad = {**WATER, "name": "Bad", "goals": [{**base, "direction": "up"}]}
+    assert client.post("/api/habits", json=bad).status_code == 400
+
+
 # ─── records ────────────────────────────────────────────────────────────────
 
 def test_csv_round_trip(client, base_dir):

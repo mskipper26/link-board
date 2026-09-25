@@ -92,13 +92,31 @@ test("records missing a metric (added later) are skipped", () => {
   assert.equal(H.aggregate({ type: "ratio", metric1: "Time", metric2: "Distance" }, RUN, mixed), 6720 / 12);
 });
 
-test("isMet: POSITIVE >=, NEGATIVE <=, null depends on type", () => {
-  assert.equal(H.isMet("POSITIVE", 15, 15), true);
-  assert.equal(H.isMet("POSITIVE", 14.9, 15), false);
-  assert.equal(H.isMet("NEGATIVE", 3, 3), true);
-  assert.equal(H.isMet("NEGATIVE", 4, 3), false);
-  assert.equal(H.isMet("POSITIVE", null, 0), false);
-  assert.equal(H.isMet("NEGATIVE", null, 0), true);
+test("isMet: atLeast >=, atMost <=, null depends on direction", () => {
+  assert.equal(H.isMet("atLeast", 15, 15), true);
+  assert.equal(H.isMet("atLeast", 14.9, 15), false);
+  assert.equal(H.isMet("atMost", 3, 3), true);
+  assert.equal(H.isMet("atMost", 4, 3), false);
+  assert.equal(H.isMet("atLeast", null, 0), false);
+  assert.equal(H.isMet("atMost", null, 0), true);
+});
+
+test("goalDirection: explicit direction overrides habit type", () => {
+  assert.equal(H.goalDirection({}, RUN), "atLeast");
+  assert.equal(H.goalDirection({}, SMOKE), "atMost");
+  assert.equal(H.goalDirection({ direction: "atMost" }, RUN), "atMost");
+  assert.equal(H.goalDirection({ direction: "atLeast" }, SMOKE), "atLeast");
+});
+
+test("per-goal direction drives status, streak and labels", () => {
+  const g = { period: "week", type: "raw", metric1: "Distance", agg: "sum", target: 12, direction: "atMost" };
+  // runs total 12 mi in the week of 2026-09-20, which is <= 12
+  assert.equal(H.currentStatus(g, RUN, runs, "2026-09-25").met, true);
+  assert.match(H.goalLabel(g, RUN), /≤/);
+  assert.match(H.goalSentence(g, RUN), /≤/);
+  const cap = { period: "day", type: "raw", metric1: "count", target: 1, direction: "atLeast" };
+  // a NEGATIVE habit goal with "at least" treats an empty day as not met
+  assert.equal(H.currentStatus(cap, SMOKE, [], "2026-09-25").met, false);
 });
 
 test("dailyValues gives null for days without records", () => {
