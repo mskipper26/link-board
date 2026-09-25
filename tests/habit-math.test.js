@@ -252,3 +252,44 @@ test("goal label and sentence", () => {
   assert.equal(H.streakLabel("week", 1), "1 week");
   assert.equal(H.streakLabel("day", 3), "3 days");
 });
+
+test("goalProgress: at least fills toward target with week pace", () => {
+  const g = { period: "week", type: "raw", metric1: "Distance", agg: "sum", target: 15 };
+  // 12 of 15 mi; Thursday is day 5 of 7 (Sun start)
+  const p = H.goalProgress(g, RUN, runs, "2026-09-24");
+  assert.equal(p.state, "short");
+  assert.equal(p.fill, 0.8);
+  assert.equal(p.gap, 3);
+  assert.equal(p.pace, 5 / 7);
+  assert.equal(p.marker, null);
+  const met = H.goalProgress({ ...g, target: 10 }, RUN, runs, "2026-09-24");
+  assert.equal(met.state, "met");
+  assert.equal(met.fill, 1);
+});
+
+test("goalProgress: at most uses up a limit, warns near it, rescales when over", () => {
+  const g = { period: "week", type: "raw", metric1: "Distance", agg: "sum", direction: "atMost" };
+  const under = H.goalProgress({ ...g, target: 24 }, RUN, runs, "2026-09-24");
+  assert.equal(under.state, "met");
+  assert.equal(under.fill, 0.5);
+  assert.equal(H.goalProgress({ ...g, target: 13 }, RUN, runs, "2026-09-24").state, "near");
+  const over = H.goalProgress({ ...g, target: 9 }, RUN, runs, "2026-09-24");
+  assert.equal(over.state, "over");
+  assert.equal(over.fill, 1);
+  assert.equal(over.marker, 0.75);
+  assert.equal(over.gap, 3);
+  assert.equal(over.pace, null);
+});
+
+test("goalProgress: empty periods, zero limits and intensive goals", () => {
+  const cap = { period: "day", type: "raw", metric1: "count", target: 0 };
+  // NEGATIVE habit, nothing logged today: met, empty bar, no pace for days
+  const none = H.goalProgress(cap, SMOKE, [], "2026-09-25");
+  assert.deepEqual([none.state, none.fill, none.pace], ["met", 0, null]);
+  const one = H.goalProgress(cap, SMOKE, [rec("2026-09-25")], "2026-09-25");
+  assert.deepEqual([one.state, one.marker], ["over", 0]);
+  const avg = { period: "week", type: "raw", metric1: "Distance", agg: "avg", target: 5 };
+  const p = H.goalProgress(avg, RUN, runs, "2026-09-24");
+  assert.deepEqual([p.intensive, p.pace, p.state, p.fill], [true, null, "short", 0.8]);
+  assert.equal(H.goalProgress(avg, RUN, [], "2026-09-24").state, "empty");
+});

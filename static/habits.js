@@ -140,7 +140,7 @@ const Habits = (() => {
     return row;
   }
 
-  // ─── Goal cell: label, MET pill, streak, this week's bars ───────────────────
+  // ─── Goal cell: label, MET pill, streak, this week's bars, progress bar ─────
   function createGoalCell(name, habit, records, goal, gi, today) {
     const cell = document.createElement("div");
     cell.className = "goal-cell";
@@ -157,11 +157,11 @@ const Habits = (() => {
         <div class="goal-label"><span class="goal-dot"></span><span>${esc(H.goalLabel(goal, habit))}</span></div>
         <div class="goal-status">
           <span class="pill ${status.met ? "pill-met" : "pill-miss"}">${status.met ? "MET" : "NOT MET"}</span>
-          <span class="goal-value" title="Value ${periodWord}">${esc(H.formatValue(goal, habit, status.value))}</span>
           ${streak === null ? "" : `<span class="goal-streak" title="Consecutive completed ${goal.period}s met">streak ${esc(H.streakLabel(goal.period, streak))}</span>`}
         </div>
       </div>
       ${weekBarsSvg(goal, habit, records, today)}
+      ${progressBar(goal, habit, records, today)}
     `;
 
     cell.addEventListener("click", () => openGoalDetail(name, gi));
@@ -172,6 +172,49 @@ const Habits = (() => {
     cell.addEventListener("mouseenter", () => isolateGoal(cell.closest(".habit-row"), gi));
     cell.addEventListener("mouseleave", () => isolateGoal(cell.closest(".habit-row"), null));
     return cell;
+  }
+
+  // Current-period progress toward the target. "At least": fills toward the
+  // target. "At most": fills as the limit is used up, turns amber near it, and
+  // once over, rescales to the value with the limit marked and the excess red.
+  // A tick marks how much of the period has elapsed (totals only).
+  function progressBar(goal, habit, records, today) {
+    const p = H.goalProgress(goal, habit, records, today);
+    const unit = H.displayScale(goal, habit).unit;
+    const bare = (v) => {
+      const t = H.formatValue(goal, habit, v);
+      return unit && t.endsWith(" " + unit) ? t.slice(0, -unit.length - 1) : t;
+    };
+    const gap = p.gap === null ? "" : H.formatValue(goal, habit, p.gap);
+    const cmp = p.dir === "atMost" ? "≤" : "≥";
+    let note;
+    if (p.value === null) note = p.dir === "atMost" ? "nothing logged" : "no data yet";
+    else if (p.state === "over") note = `${gap} over`;
+    else if (p.dir === "atMost") note = p.gap > 0 ? `${gap} ${p.intensive ? "under" : "left"}` : "at limit";
+    else if (p.state === "met") note = p.gap > 0 ? `+${gap} beyond` : "reached";
+    else note = `${gap} ${p.intensive ? "below" : "to go"}`;
+
+    const pct = (x) => `${(Math.max(0, Math.min(1, x)) * 100).toFixed(1)}%`;
+    const fillStyle = p.marker === null
+      ? `width:${pct(p.fill)}`
+      : `width:100%;--marker:${pct(p.marker)}`;
+    const title = [`${periodPhrase(goal.period)}: ${H.formatValue(goal, habit, p.value)} of ${cmp} ${H.formatValue(goal, habit, p.target)}`];
+    if (p.pace !== null) {
+      const expected = p.target * p.pace;
+      title.push(`${Math.round(p.pace * 100)}% of the ${goal.period} elapsed — ${p.dir === "atMost" ? "even budget" : "on pace"} would be ${H.formatValue(goal, habit, expected)}`);
+    }
+    return `
+      <div class="goal-progress gp-${p.state} gp-${p.dir}" title="${esc(title.join("\n"))}">
+        <div class="gp-caption">
+          <span class="gp-value">${esc(bare(p.value))} <span class="gp-of">/ ${esc(H.formatValue(goal, habit, p.target))}</span></span>
+          <span class="gp-note">${esc(note)}</span>
+        </div>
+        <div class="gp-track">
+          <div class="gp-fill${p.marker === null ? "" : " gp-split"}" style="${fillStyle}"></div>
+          ${p.marker === null ? "" : `<div class="gp-marker" style="left:${pct(p.marker)}"></div>`}
+          ${p.pace === null ? "" : `<div class="gp-pace" style="left:${pct(p.pace)}"></div>`}
+        </div>
+      </div>`;
   }
 
   function periodPhrase(period) {

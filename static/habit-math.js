@@ -186,6 +186,52 @@
     return { value, met: isMet(goalDirection(goal, habit), value, goal.target) };
   }
 
+  // Averages, extremes and ratios compare directly with the target; totals
+  // (sum/count) accumulate through the period.
+  function isIntensive(goal) {
+    return goal.type === "ratio" || (goal.metric1 !== "count" && (goal.agg || "sum") !== "sum");
+  }
+
+  // Progress-bar model for the current period.
+  //   fill   0–1 share of the bar that is filled
+  //   marker 0–1 position of the target line, or null when the target is the
+  //          bar's end (only drawn once an "at most" goal overshoots, when the
+  //          bar is rescaled to the value)
+  //   pace   0–1 share of the period elapsed (through today), for totals over
+  //          week/month/year; null otherwise
+  //   state  "empty" (no value to compare) | "met" | "near" (at most, >= 85%
+  //          of the limit) | "over" (at most, exceeded) | "short"
+  //   gap    |target - value| (null when empty)
+  function goalProgress(goal, habit, records, today) {
+    const { value, met } = currentStatus(goal, habit, records, today);
+    const dir = goalDirection(goal, habit);
+    const target = goal.target;
+    const intensive = isIntensive(goal);
+    let pace = null;
+    if (!intensive && goal.period !== "day" && goal.period !== "all") {
+      const pk = periodKey(goal.period, today);
+      const start = periodStart(goal.period, pk);
+      const len = daysBetween(start, periodEnd(goal.period, pk)) + 1;
+      pace = (daysBetween(start, today) + 1) / len;
+    }
+    const base = { value, target, dir, intensive, pace, marker: null };
+    if (value === null) {
+      return { ...base, fill: 0, state: dir === "atMost" && met ? "met" : "empty", gap: null };
+    }
+    const gap = Math.abs(target - value);
+    const share = target > 0 ? Math.max(0, value) / target : value > target ? Infinity : 0;
+    if (dir === "atLeast") {
+      if (met) return { ...base, fill: 1, pace: null, state: "met", gap };
+      return { ...base, fill: Math.min(1, share), state: "short", gap };
+    }
+    if (!met) {
+      // Overshot a limit: rescale so the bar is the value and mark the limit.
+      const marker = value > 0 ? Math.max(0, target) / value : 0;
+      return { ...base, fill: 1, marker, pace: null, state: "over", gap };
+    }
+    return { ...base, fill: Math.min(1, share), state: share >= 0.85 ? "near" : "met", gap };
+  }
+
   function earliestDay(records) {
     let min = null;
     for (const r of records) {
@@ -291,8 +337,7 @@
   // goals (avg/max/min/ratio) compare directly; totals (sum/count) scale with
   // bucket length relative to the goal period ("pace"). None for all-time sums.
   function targetLine(goal, bucket) {
-    const intensive = goal.type === "ratio" || (goal.metric1 !== "count" && (goal.agg || "sum") !== "sum");
-    if (intensive) return { value: goal.target, pace: false };
+    if (isIntensive(goal)) return { value: goal.target, pace: false };
     if (goal.period === "all") return null;
     if (bucket === goal.period) return { value: goal.target, pace: false };
     return { value: (goal.target * PERIOD_DAYS[bucket]) / PERIOD_DAYS[goal.period], pace: true };
@@ -392,7 +437,7 @@
   return {
     parseDay, dayKey, addDays, daysBetween, todayKey, dayOfWeek, recordDay,
     weekStart, periodKey, periodStart, periodEnd, prevPeriod, nextPeriod, groupByPeriod,
-    metricInfo, aggregate, goalDirection, isMet, dailyValues, currentStatus, earliestDay, streak,
+    metricInfo, aggregate, goalDirection, isMet, isIntensive, goalProgress, dailyValues, currentStatus, earliestDay, streak,
     monthGrid, linearTrend, detailBuckets, targetLine,
     formatDuration, parseDuration, formatNumber, displayScale, formatValue, formatMetric,
     unitLabel, goalLabel, goalSentence, streakLabel, MONTHS,

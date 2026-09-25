@@ -172,7 +172,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 ### Habits page (`habits.js`, math in `habit-math.js`)
 - **Rows** (`.habit-row`): info (name, badges, metrics, + Record / Records / ✎) | goal stack | calendar | drag handle. Below 900px the row stacks (info → goals → calendar) with the handle top-right.
-- **Goal cell**: label, MET/NOT MET for the current period so far, streak (consecutive *completed* periods met, walking back to the earliest record's period; empty periods count as met for “at most” goals, not met for “at least”; none for all-time), and 7 Sun–Sat bars of this week's daily values (no-data days are gaps). Click → detail overlay; hover → isolates that goal's calendar bubbles (class toggle).
+- **Goal cell**: label, MET/NOT MET for the current period so far, streak (consecutive *completed* periods met, walking back to the earliest record's period; empty periods count as met for “at most” goals, not met for “at least”; none for all-time), and 7 Sun–Sat bars of this week's daily values (no-data days are gaps). A progress bar along the bottom (`progressBar()`, model `HabitMath.goalProgress`) shows the current period's value vs target: “at least” fills toward the target (“N to go” / “+N beyond”); “at most” fills as the limit is used (“N left”), turns amber at ≥85%, and once over rescales to the value with the limit marked and the excess red (“N over”). For sum/count goals over week/month/year a tick marks how much of the period has elapsed (hidden once an “at least” goal is met). Click → detail overlay; hover → isolates that goal's calendar bubbles (class toggle).
 - **Calendar**: per-habit month (in memory; › disabled at the current month). One bubble per goal per day, area relative to that goal's best day in the month, larger drawn first.
 - **Detail overlay**: Week/Month (daily bars), Year (weekly), All (monthly), clipped to the first record. In-progress bucket drawn lighter and excluded from the least-squares trend (needs ≥2 complete buckets); trend projected ~25% forward. Target line: direct for avg/max/min/ratio; for sum/count, exact when bucket = goal period, else prorated "pace"; none for all-time sums.
 - **Menus** open in `#habitOverlay` (z 500), or `#habitDialog` (z 600) when opened from another menu. Escape closes the topmost. After any change the page re-fetches `/api/habits` and redraws (open menus refresh themselves).
@@ -191,7 +191,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 Cloudflare caches static assets aggressively when the origin sends no `Cache-Control` header. To prevent stale JS/CSS from being served after code changes:
 - `NoCacheMiddleware` adds `Cache-Control: no-store` to every response.
-- Static asset links in `index.html` include a `?v=N` query string (currently `?v=10`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
+- Static asset links in `index.html` include a `?v=N` query string (currently `?v=11`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
 
 ---
 

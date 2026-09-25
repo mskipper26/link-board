@@ -1,3 +1,5 @@
+:root { --ok: #3fb950; --warn: #d29922; }
+
 /* ─── Habits page ─────────────────────────────────────────────────────────── */
 .habit-board {
   padding: 24px;
@@ -127,6 +129,51 @@ button:disabled { opacity: .6; cursor: default; }
 
 .goal-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 
+/* Progress bar along the bottom of a goal cell */
+.goal-cell { flex-wrap: wrap; row-gap: 8px; }
+.goal-progress { flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.gp-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.gp-value { color: var(--text); white-space: nowrap; }
+.gp-of { color: var(--text-dim); }
+.gp-note { color: var(--text-muted); text-align: right; }
+.gp-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+.goal-cell:hover .gp-track, .goal-cell:focus-visible .gp-track { background: var(--border); }
+.gp-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: 3px;
+  background: var(--goal-color);
+  opacity: .75;
+  transition: width .3s;
+}
+.gp-met .gp-fill { opacity: 1; }
+.gp-near .gp-fill { background: var(--warn); opacity: 1; }
+.gp-split { opacity: 1; background: linear-gradient(to right, var(--goal-color) var(--marker), var(--danger) var(--marker)); }
+.gp-marker, .gp-pace {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+}
+.gp-marker { background: var(--text); }
+.gp-pace { background: var(--text-muted); opacity: .8; }
+.gp-met .gp-note { color: var(--ok); }
+.gp-near .gp-note { color: var(--warn); }
+.gp-over .gp-note { color: var(--danger); }
+
 .goal-label {
   display: flex;
   align-items: center;
@@ -156,7 +203,7 @@ button:disabled { opacity: .6; cursor: default; }
   border-radius: 10px;
   padding: 1px 8px;
 }
-.pill-met { color: #3fb950; background: rgba(63,185,80,.14); }
+.pill-met { color: var(--ok); background: rgba(63,185,80,.14); }
 .pill-miss { color: var(--text-muted); background: var(--surface-2); }
 
 .week-bars { flex-shrink: 0; overflow: visible; }
