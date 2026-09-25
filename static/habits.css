@@ -347,3 +347,36 @@ select.edit-input option { background: var(--surface); }
 .detail-svg .proj-label { font-size: 9px; fill: var(--text-dim); text-anchor: middle; letter-spacing: .05em; text-transform: uppercase; }
 
 .detail-caption { font-size: 12px; color: var(--text-muted); }
+
+/* ─── Responsive ──────────────────────────────────────────────────────────── */
+/* Touch screens have no hover to reveal the handle. */
+@media (hover: none) {
+  .habit-row .drag-handle { opacity: 1; }
+}
+
+/* Below ~900px the row stacks: info → goals → calendar; handle top-right. */
+@media (max-width: 900px) {
+  .habit-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding-right: 16px;
+  }
+  .habit-info { padding-right: 28px; }
+  .habit-drag { position: absolute; top: 12px; right: 10px; }
+  .habit-calendar { width: 236px; max-width: 100%; }
+  .habit-metrics { max-width: 260px; }
+}
+
+@media (max-width: 600px) {
+  .header { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .header-left { gap: 12px; }
+  .header-title { font-size: 16px; }
+  .habit-board { padding: 16px; }
+  .goal-cell { flex-wrap: wrap; gap: 10px; }
+  .goal-label span:last-child { white-space: normal; }
+  .metric-edit { flex-wrap: wrap; }
+  .metric-edit .m-name { flex-basis: 100%; }
+  .metric-edit .m-kind, .metric-edit .m-unit { flex: 1 1 100px; }
+  .habit-form { padding: 16px; }
+  .rec-when { flex-basis: 110px; }
+}
