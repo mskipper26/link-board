@@ -150,7 +150,7 @@ const Habits = (() => {
 
     const status = H.currentStatus(goal, habit, records, today);
     const streak = H.streak(goal, habit, records, today);
-    const periodWord = goal.period === "all" ? "all time" : `this ${goal.period}`;
+    const periodWord = periodPhrase(goal.period);
 
     cell.innerHTML = `
       <div class="goal-main">
@@ -172,6 +172,10 @@ const Habits = (() => {
     cell.addEventListener("mouseenter", () => isolateGoal(cell.closest(".habit-row"), gi));
     cell.addEventListener("mouseleave", () => isolateGoal(cell.closest(".habit-row"), null));
     return cell;
+  }
+
+  function periodPhrase(period) {
+    return period === "all" ? "all time" : period === "day" ? "today" : `this ${period}`;
   }
 
   // Rounded-top bar: flat bottom at y+h, corners of radius r on top.
@@ -295,7 +299,157 @@ const Habits = (() => {
   }
 
   // ─── Goal detail ────────────────────────────────────────────────────────────
-  function openGoalDetail(name, gi) {}
+  const RANGE_OPTS = [["week", "Week"], ["month", "Month"], ["year", "Year"], ["all", "All"]];
+  const DEFAULT_RANGE = { day: "month", week: "year", month: "all", year: "all", all: "all" };
+  const BUCKET_WORD = { day: "day", week: "week", month: "month" };
+
+  function openGoalDetail(name, gi) {
+    const first = hs.habits[name].goals[gi];
+    let range = DEFAULT_RANGE[first.period];
+    const panel = openLayer({
+      title: "",
+      wide: true,
+      body: `
+        <div class="detail-top">
+          <div class="detail-status"></div>
+          ${seg("range", RANGE_OPTS, range)}
+        </div>
+        <div class="detail-chart"></div>
+        <p class="detail-caption"></p>`,
+      footer: `
+        <button class="btn-danger d-delete">Delete goal</button>
+        <button class="btn-secondary d-edit">Edit goal</button>
+        <button class="btn-primary d-close">Close</button>`,
+    });
+
+    const draw = () => {
+      const habit = hs.habits[name];
+      const goal = habit && habit.goals[gi];
+      if (!goal) return closePanel(panel);
+      const records = hs.records[name] || [];
+      const today = H.todayKey();
+      panel.style.setProperty("--goal-color", goal.color);
+      panel.querySelector(".overlay-title").innerHTML =
+        `<span class="goal-dot"></span> ${esc(name)} <span class="muted">·</span> ${esc(H.goalLabel(goal, habit))}`;
+
+      const status = H.currentStatus(goal, habit, records, today);
+      const streak = H.streak(goal, habit, records, today);
+      panel.querySelector(".detail-status").innerHTML = `
+        <span class="pill ${status.met ? "pill-met" : "pill-miss"}">${status.met ? "MET" : "NOT MET"}</span>
+        <span>${esc(H.formatValue(goal, habit, status.value))} <span class="muted">${periodPhrase(goal.period)}</span></span>
+        ${streak === null ? "" : `<span class="muted">streak ${esc(H.streakLabel(goal.period, streak))}</span>`}
+        <span class="detail-sentence muted">${esc(H.goalSentence(goal, habit))}</span>`;
+
+      const detail = H.detailBuckets(goal, habit, records, range, today);
+      panel.querySelector(".detail-chart").innerHTML = detail.buckets.length
+        ? chartSvg(goal, habit, detail)
+        : `<div class="empty-state small">No records yet.</div>`;
+      panel.querySelector(".detail-caption").textContent = trendCaption(goal, habit, detail);
+    };
+
+    wireSegs(panel, () => {
+      range = segValue(panel, "range");
+      draw();
+    });
+    panel.querySelector(".d-close").addEventListener("click", () => closePanel(panel));
+    panel.querySelector(".d-edit").addEventListener("click", () => openGoalForm(name, gi));
+    panel.querySelector(".d-delete").addEventListener("click", () => deleteGoal(name, gi, panel));
+    setRefresh(panel, draw);
+    draw();
+  }
+
+  function trendCaption(goal, habit, detail) {
+    const n = detail.buckets.length;
+    if (!n) return "";
+    const word = BUCKET_WORD[detail.bucket];
+    if (!detail.trend) return `Not enough data for a trend — it needs at least two complete ${word}s.`;
+    const { slope, intercept } = detail.trend;
+    const arrow = slope > 0 ? "▲" : slope < 0 ? "▼" : "▶";
+    const next = slope * n + intercept;
+    return `Trend ${arrow} ${H.formatValue(goal, habit, Math.abs(slope))} per ${word}. ` +
+      `Projected next ${word}: ${H.formatValue(goal, habit, next)}.`;
+  }
+
+  // Tick spacing: 1/2/5×10ⁿ for numbers, clock-friendly steps for durations.
+  function niceStep(span, kind) {
+    const raw = span / 4;
+    if (kind === "duration") {
+      const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
+      return steps.find((s) => s >= raw) || Math.ceil(raw / 86400) * 86400;
+    }
+    const p = 10 ** Math.floor(Math.log10(raw));
+    const f = raw / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+  }
+
+  // Bars per bucket (the in-progress bucket lighter), target/pace line, and a
+  // dashed least-squares trend projected ~25% of the range forward. Values are
+  // plotted in display units (HabitMath.displayScale).
+  function chartSvg(goal, habit, detail) {
+    const s = H.displayScale(goal, habit);
+    const dv = (v) => v * s.factor;
+    const fmt = (v) => (s.kind === "duration" ? H.formatDuration(v) : H.formatNumber(v));
+    const { buckets, trend, targetLine } = detail;
+    const n = buckets.length;
+    const proj = trend ? Math.max(1, Math.round(n * 0.25)) : 0;
+    const W = 720, HT = 280, L = 62, R = 18, T = 16, B = 30;
+    const bw = (W - L - R) / (n + proj);
+    const trendAt = (x) => dv(trend.slope * x + trend.intercept);
+
+    // The trend may raise the top of the axis but never lowers the bottom
+    // (a falling trend would otherwise drag the axis below zero); it's
+    // clipped to the plot area instead.
+    const cands = [0, ...buckets.filter((b) => b.value !== null).map((b) => dv(b.value))];
+    if (targetLine) cands.push(dv(targetLine.value));
+    let lo = Math.min(...cands);
+    if (trend) cands.push(trendAt(0), trendAt(n - 1 + proj));
+    let hi = Math.max(...cands);
+    if (hi === lo) hi = lo + 1;
+    const step = niceStep(hi - lo, s.kind);
+    lo = Math.floor(lo / step) * step;
+    hi = Math.ceil(hi / step) * step;
+    const y = (v) => T + ((hi - v) / (hi - lo)) * (HT - T - B);
+    const xc = (i) => L + (i + 0.5) * bw;
+    const y0 = y(0);
+
+    let out = "";
+    for (let t = lo; t <= hi + step / 2; t += step) {
+      out += `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" class="grid${Math.abs(t) < step / 2 ? " zero" : ""}"/>
+        <text x="${L - 8}" y="${y(t) + 3.5}" class="axis-y">${esc(fmt(t))}</text>`;
+    }
+    if (proj) {
+      out += `<rect x="${L + n * bw}" y="${T}" width="${proj * bw}" height="${HT - T - B}" class="proj-area"/>
+        <text x="${L + (n + proj / 2) * bw}" y="${T + 11}" class="proj-label">projection</text>`;
+    }
+    const barW = Math.max(2, Math.min(bw * 0.7, 36));
+    const every = Math.ceil(n / 10);
+    buckets.forEach((b, i) => {
+      const x = xc(i) - barW / 2;
+      const title = `${b.label}${b.start !== b.end ? ` – ${prettyDay(b.end).replace(/, \d+$/, "")}` : ""}: ` +
+        `${H.formatValue(goal, habit, b.value)}${b.partial ? " (in progress)" : ""}`;
+      let bar = "";
+      if (b.value !== null && b.value !== 0) {
+        const yv = y(dv(b.value));
+        bar = yv < y0
+          ? `<path d="${barPath(x, yv, barW, y0 - yv)}" class="bar${b.partial ? " partial" : ""}"/>`
+          : `<rect x="${x}" y="${y0}" width="${barW}" height="${yv - y0}" class="bar${b.partial ? " partial" : ""}"/>`;
+      }
+      out += `<g><title>${esc(title)}</title><rect x="${L + i * bw}" y="${T}" width="${bw}" height="${HT - T - B}" class="hit"/>${bar}</g>`;
+      if ((n - 1 - i) % every === 0) {
+        out += `<text x="${xc(i)}" y="${HT - B + 16}" class="axis-x">${esc(b.label)}</text>`;
+      }
+    });
+    if (targetLine) {
+      const ty = y(dv(targetLine.value));
+      out += `<line x1="${L}" x2="${W - R}" y1="${ty}" y2="${ty}" class="target-line"/>
+        <text x="${W - R}" y="${ty - 5}" class="target-label">${targetLine.pace ? "pace" : "target"} ${esc(fmt(dv(targetLine.value)))}</text>`;
+    }
+    if (trend) {
+      out += `<line x1="${xc(0)}" x2="${xc(n - 1 + proj)}" y1="${y(trendAt(0))}" y2="${y(trendAt(n - 1 + proj))}" class="trend-line" clip-path="url(#plotClip)"/>`;
+    }
+    return `<svg class="detail-svg" viewBox="0 0 ${W} ${HT}" preserveAspectRatio="xMidYMid meet">
+      <defs><clipPath id="plotClip"><rect x="${L}" y="${T}" width="${W - L - R}" height="${HT - T - B}"/></clipPath></defs>${out}</svg>`;
+  }
 
   // ─── Drag reorder ───────────────────────────────────────────────────────────
   // Same swap-through-on-dragenter model as the link grid (see app.js), with
