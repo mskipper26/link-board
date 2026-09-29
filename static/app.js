@@ -131,8 +131,14 @@ const DRAG_HANDLE_SVG = `
     <circle cx="5" cy="13" r="1.4"/><circle cx="11" cy="13" r="1.4"/>
   </svg>`;
 
+const PIN_SVG = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M9 4h6l-1 6 4 4v2h-5v5l-1 1-1-1v-5H6v-2l4-4z"/>
+  </svg>`;
+
 // ─── Grid ─────────────────────────────────────────────────────────────────────
 function renderGrid() {
+  renderQuickAccess();
   const board = document.getElementById("linkGrid");
   board.innerHTML = "";
   const entries = Object.entries(state.links);
@@ -225,8 +231,16 @@ function createCard(url, data) {
       ${data.description ? `<div class="card-desc">${escapeHtml(data.description)}</div>` : ""}
       ${chipCats.length ? `<div class="card-cats">${chipCats.map((c) => `<div class="card-cat">${escapeHtml(c)}</div>`).join("")}</div>` : ""}
     </div>
+    <button class="pin-btn" type="button">${PIN_SVG}</button>
     <div class="drag-handle" draggable="true" title="Drag to reorder">${DRAG_HANDLE_SVG}</div>
   `;
+  setPinState(card, data.quickAccess === true);
+
+  card.querySelector(".pin-btn").addEventListener("click", (e) => {
+    e.preventDefault(); // the card is an <a>; don't open the link
+    e.stopPropagation();
+    toggleQuickAccess(url);
+  });
 
   card.querySelector(".card-icon").addEventListener("error", function () {
     this.src = "/static/icon-default.svg";
@@ -239,6 +253,75 @@ function createCard(url, data) {
   setupCardDropTarget(card);
 
   return card;
+}
+
+// ─── Quick access ─────────────────────────────────────────────────────────────
+// Links flagged `quickAccess: true` get a small favicon in the header (JSON
+// order), plus an "Open all" button. Hidden when none are flagged.
+function getQuickLinks() {
+  return Object.entries(state.links).filter(([, data]) => data.quickAccess === true);
+}
+
+function renderQuickAccess() {
+  const bar = document.getElementById("quickAccess");
+  const list = document.getElementById("quickLinks");
+  const quick = getQuickLinks();
+  list.innerHTML = "";
+  bar.classList.toggle("hidden", quick.length === 0);
+  for (const [url, data] of quick) {
+    const name = data.name || getHostname(url);
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "quick-link";
+    a.title = name;
+    a.setAttribute("aria-label", name);
+    a.innerHTML = `<img src="${escapeHtml(getIconSrc(url, data.icon))}" alt="">`;
+    a.querySelector("img").addEventListener("error", function () {
+      this.src = "/static/icon-default.svg";
+    });
+    list.appendChild(a);
+  }
+}
+
+function setPinState(card, pinned) {
+  const btn = card.querySelector(".pin-btn");
+  btn.classList.toggle("pinned", pinned);
+  btn.title = pinned ? "Unpin from quick access" : "Pin to quick access";
+  btn.setAttribute("aria-pressed", String(pinned));
+}
+
+// Pin/unpin a card: flip `quickAccess`, update every card for that URL (a
+// multi-category link can appear more than once) and the header bar, then save.
+async function toggleQuickAccess(url) {
+  const prev = state.links[url];
+  if (!prev) return;
+  const next = { ...prev };
+  if (prev.quickAccess === true) delete next.quickAccess;
+  else next.quickAccess = true;
+
+  const apply = (data) => {
+    state.links = { ...state.links, [url]: data };
+    for (const card of document.querySelectorAll("#linkGrid .card")) {
+      if (card.dataset.url === url) setPinState(card, data.quickAccess === true);
+    }
+    renderQuickAccess();
+  };
+
+  apply(next);
+  try {
+    await saveLinks(state.links);
+  } catch {
+    apply(prev);
+    alert("Failed to update quick access.");
+  }
+}
+
+// Browsers usually allow only the first window.open per click unless pop-ups
+// are allowed for this site.
+function openAllQuickLinks() {
+  for (const [url] of getQuickLinks()) window.open(url, "_blank", "noopener");
 }
 
 // ─── Drag reorder ─────────────────────────────────────────────────────────────
@@ -354,6 +437,7 @@ async function persistOrder() {
   for (const url of newOrder) newLinks[url] = state.links[url];
   const prev = state.links;
   state.links = newLinks;
+  renderQuickAccess();
   try {
     await saveLinks(newLinks);
   } catch {
@@ -608,6 +692,9 @@ function createEditItem(url, data) {
       </div>
       <div class="edit-row">
         <input type="text" class="edit-input edit-category" value="${escapeHtml(category)}" placeholder="Categories (comma-separated, optional)" list="categoryOptions">
+        <label class="edit-quick" title="Show in the header's quick-access bar">
+          <input type="checkbox" class="edit-quick-input"${data.quickAccess === true ? " checked" : ""}> Quick access
+        </label>
       </div>
       <div class="edit-desc-wrap">
         <textarea class="edit-input edit-desc" placeholder="Description (optional)" maxlength="200">${escapeHtml(data.description || "")}</textarea>
@@ -700,6 +787,7 @@ async function onSave() {
     if (cats.length === 1) entry.category = cats[0];
     else if (cats.length > 1) entry.category = cats;
     if (desc) entry.description = desc;
+    if (item.querySelector(".edit-quick-input").checked) entry.quickAccess = true;
     newLinks[url] = entry;
   }
 
@@ -767,6 +855,7 @@ async function init() {
   // Wire up event listeners before any async work
   document.getElementById("editBtn").addEventListener("click", onEditButtonClick);
   document.getElementById("addLinkBtn").addEventListener("click", addNewLink);
+  document.getElementById("openAllBtn").addEventListener("click", openAllQuickLinks);
 
   document.querySelectorAll(".view-modes:not(.page-tabs) .view-mode-btn").forEach((btn) => {
     btn.addEventListener("click", () => setViewMode(btn.dataset.mode));
