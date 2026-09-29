@@ -1,8 +1,8 @@
 # PROJECT: WEB LINK BOARD
-A simple app for quickly accessing important links for personal use, plus a habit tracker page.
+A simple app for quickly accessing important links for personal use, plus a habit tracker page and a flash-card study page.
 
 ## Overview
-Single-page web app with a responsive grid of link cards. Each card shows an icon, site name, and optional description. Hovering a card shows a preview popup (OG metadata: title, description, og:image). Clicking opens the link in a new tab. An Edit button in the top-right opens an overlay panel for managing links. A **Links | Habits** tab switch in the header swaps to the habit tracker (see *Habits* below).
+Single-page web app with a responsive grid of link cards. Each card shows an icon, site name, and optional description. Hovering a card shows a preview popup (OG metadata: title, description, og:image). Clicking opens the link in a new tab. An Edit button in the top-right opens an overlay panel for managing links. A **Links | Habits | Study** tab switch in the header swaps to the habit tracker or flash cards (see *Habits* / *Study* below).
 
 The entire app is behind a passkey gate — the grid and header are hidden on load and only revealed after successful authentication. Sessions persist for 7 days via a signed cookie.
 
@@ -20,8 +20,9 @@ The entire app is behind a passkey gate — the grid and header are hidden on lo
 The project lives at the path configured in `.env` as `LINK_BOARD_DIR`:
 ```
 <LINK_BOARD_DIR>/
-├── main.py               # FastAPI app (links/auth logic + thin habit endpoints)
+├── main.py               # FastAPI app (links/auth logic + thin habit & deck endpoints)
 ├── habit_store.py        # Habit storage & validation (FastAPI-free, unit-tested)
+├── study_store.py        # Flash-card deck storage & validation (FastAPI-free, unit-tested)
 ├── requirements.txt
 ├── requirements-dev.txt  # pytest
 ├── start.sh              # Entrypoint for systemd service
@@ -29,11 +30,14 @@ The project lives at the path configured in `.env` as `LINK_BOARD_DIR`:
 ├── links.json            # Live data store
 ├── habits.json           # Habit config (not in version control)
 ├── habits/               # One CSV of records per habit; .trash/ holds deleted/backed-up CSVs
+├── decks/                # One JSON per flash-card deck (not in version control); .trash/ holds deleted decks
 ├── icons/                # Uploaded custom icons
 ├── tests/
 │   ├── conftest.py            # Points main.py at a temp LINK_BOARD_DIR before import
 │   ├── test_habits_api.py     # pytest: habit API
-│   └── habit-math.test.js     # node --test: habit-math.js
+│   ├── test_study_api.py      # pytest: deck/card API
+│   ├── habit-math.test.js     # node --test: habit-math.js
+│   └── study-queue.test.js    # node --test: study-queue.js
 └── static/
     ├── index.html
     ├── style.css
@@ -41,6 +45,9 @@ The project lives at the path configured in `.env` as `LINK_BOARD_DIR`:
     ├── habit-math.js     # DOM-free habit math (UMD: browser global HabitMath + Node)
     ├── habits.js         # Habits page UI
     ├── habits.css
+    ├── study-queue.js    # DOM-free study-session ordering (UMD: browser global StudyQueue + Node)
+    ├── study.js          # Study page UI (decks, card manager, sessions)
+    ├── study.css
     ├── favicon.svg
     └── icon-default.svg  # Fallback icon when favicon unavailable
 ```
@@ -48,7 +55,7 @@ The project lives at the path configured in `.env` as `LINK_BOARD_DIR`:
 ### Tests
 ```bash
 python3 -m pytest tests/      # API (uses a throwaway dir + passkey, never live data)
-node --test tests/            # habit-math.js
+node --test tests/            # habit-math.js, study-queue.js
 ```
 
 ### Service Management
@@ -80,6 +87,15 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
 | POST | `/api/habits/{name}/records` | ✓ | Add `{ts, values, replace?}`; daily habit + day taken → 409 unless `replace` |
 | PUT | `/api/habits/{name}/records/{idx}` | ✓ | Edit record by CSV row index; body `expectedTs` must match (else 409) |
 | DELETE | `/api/habits/{name}/records/{idx}?ts=` | ✓ | Delete record; `ts` must match (else 409) |
+| GET | `/api/decks` | ✓ | `[{slug, name, cards: [{id, front, back, fails}]}]`, sorted by name |
+| POST | `/api/decks` | ✓ | Create deck `{name}` → `{slug, name}` |
+| PUT | `/api/decks/{slug}` | ✓ | Rename `{name}` (slug/file unchanged) |
+| DELETE | `/api/decks/{slug}` | ✓ | Deck file → `decks/.trash/<slug>-<stamp>.json` |
+| POST | `/api/decks/{slug}/reset` | ✓ | Set every card's `fails` to 0 |
+| POST | `/api/decks/{slug}/cards` | ✓ | Add `{front, back}` → new card (random hex `id`, `fails: 0`) |
+| PUT | `/api/decks/{slug}/cards/{id}` | ✓ | Edit `{front, back}` (keeps `fails`) |
+| DELETE | `/api/decks/{slug}/cards/{id}` | ✓ | Remove card |
+| POST | `/api/decks/{slug}/cards/{id}/fail` | ✓ | `fails += 1` server-side → `{fails}` |
 | GET | `/api/favicon?url=` | — | Proxies favicon from Google's favicon service |
 | GET | `/api/preview?url=` | — | Fetches OG metadata (title, description, og:image) from a URL |
 | GET | `/icons/{filename}` | — | Serves uploaded icons (StaticFiles mount) |
@@ -112,7 +128,7 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
 ```
 All fields are optional. If `name` is absent, the frontend derives it from the URL hostname. If `icon` is absent, the favicon proxy is used at display time. **`category` may be a single string or an array of strings** — a link with multiple categories is sorted into all of them (shown once per section in By Category, and matched by any of them in Filter). The edit overlay accepts categories comma-separated and saves a bare string for one, an array for several. If `category` is absent/empty, the link is treated as `Uncategorized`. `quickAccess: true` puts the link in the header's quick-access bar (toggled by a card's pin button or the "Quick access" checkbox in the edit overlay; omitted when false). **Key order in the JSON is the display order** — the drag-to-reorder feature rewrites the object with keys in the new order.
 
-**Atomic writes**: `atomic_write(path, text)` (in `habit_store.py`) writes to `<name>.tmp` then renames over the target, preventing partial reads. Used for `links.json`, `habits.json`, and CSV rewrites (new records are plain appends).
+**Atomic writes**: `atomic_write(path, text)` (in `habit_store.py`) writes to `<name>.tmp` then renames over the target, preventing partial reads. Used for `links.json`, `habits.json`, deck files, and CSV rewrites (new records are plain appends).
 
 **`habits.json`** — habit config; key = display name (unique case-insensitively, no `/`, not `order`); key order = display order:
 ```json
@@ -139,6 +155,18 @@ All fields are optional. If `name` is absent, the frontend derives it from the U
 
 **`habits/<slug>.csv`** — header `timestamp,<metric names…>`, one row per record. `timestamp` is browser-local ISO with offset (`2026-09-25T14:30:00-04:00`); all bucketing uses its date part (`ts[:10]`), so the server needs no timezone logic. Timestamps more than 5 min in the future are rejected. Renaming a metric rewrites the header; removing one copies the CSV to `.trash/` first.
 
+**`decks/<slug>.json`** — one file per flash-card deck:
+```json
+{
+  "name": "Spanish Verbs",
+  "cards": [
+    {"id": "8dbe4148", "front": "hablar", "back": "to speak", "fails": 2}
+  ]
+}
+```
+- Deck `name` unique case-insensitively, ≤60 chars. The slug (filename) is assigned on create (numeric suffix on collision, `deck` if the name has no ASCII letters/digits) and **never changes** — rename only edits `name` — so it is the deck's id in URLs. URL slugs must match `^[a-z0-9]+(-[a-z0-9]+)*$` (else 404).
+- Card `front`/`back` required, ≤2000 chars, stored trimmed. `fails` = times marked “new to me”; only increases (via `/fail`), except for an explicit reset.
+
 ---
 
 ## Frontend Behaviour
@@ -146,8 +174,8 @@ All fields are optional. If `name` is absent, the frontend derives it from the U
 ### Auth gate
 Header, view controls, and grid start with CSS class `hidden` (`display: none !important`). `showApp()` reveals the header and calls `setPage()`, which reveals the current page's content after the auth check passes.
 
-### Pages (Links | Habits)
-Segmented tabs in the header (`.page-tabs`). `setPage()` swaps `#viewControls`/`#linkGrid`/`#editBtn` (Links) for `#habitBoard`/`#addHabitBtn` (Habits). The page is kept in the URL hash (`#habits`) and `localStorage` (`linkBoard.page`). Habit data is fetched the first time the Habits tab is shown (`Habits.show()`).
+### Pages (Links | Habits | Study)
+Segmented tabs in the header (`.page-tabs`). `setPage()` shows `#viewControls`/`#linkGrid`/`#editBtn` (Links), `#habitBoard`/`#addHabitBtn` (Habits), or `#studyBoard`/`#addDeckBtn` (Study). The page is kept in the URL hash (`#habits`, `#study`; none for Links) and `localStorage` (`linkBoard.page`). Habit/deck data is fetched the first time that tab is shown (`Habits.show()` / `Study.show()`).
 
 ### Quick-access bar
 `#quickAccess` in the header (visible on both pages; hidden when no link has `quickAccess: true`). `renderQuickAccess()` (called from `renderGrid()` and after a reorder) draws one small favicon link per flagged link in JSON order — opens in a new tab like a card, no hover preview. Each card has a pin button (`.pin-btn`, left of the drag handle; shown on hover, always shown filled/accent when pinned) → `toggleQuickAccess()` flips the flag, updates every card for that URL plus the bar, and `PUT`s `links.json` (rolls back on failure). The **Open all** button calls `window.open` for each; browsers typically block all but the first unless pop-ups are allowed for the site.
@@ -184,6 +212,11 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 - **Drag reorder**: same swap-through model as links, with its own state (`hs.dragName`); persisted via `PUT /api/habits/order`.
 - **Ratio display** (`HabitMath.displayScale`): duration÷number → pace (`9:00 /mi`), number÷duration → per hour (`mi/h`), duration÷duration → unitless. Goal target inputs use the same display units.
 
+### Study page (`study.js`, ordering in `study-queue.js`)
+- **Deck grid** (`.deck-tile`, same grid as link cards): name, card count, “N tricky” badge (cards with `fails > 0`), **Study** / **Cards** buttons, ✎ (rename/delete). Creating a deck opens its card manager straight away.
+- **Card manager** (`#studyOverlay`, reuses the habit menu classes): Front/Back textareas + “Add card” (Ctrl+Enter), card list with fail count, inline ✎ edit (Escape cancels the edit only) and ✕ remove, footer “Reset fail counts”.
+- **Session** (rendered in `#studyBoard`, kept in memory across tab switches): `StudyQueue.start()` orders every card by `fails` desc, ties shuffled. Show front → flip (click / Space / Enter) → **New to me** (1 / ←) or **Knew it** (2 / →). “Knew” removes the card; “new” `POST`s `/fail` in the background and sends it to the back of the queue. Ends when every card is known → summary of this session's misses, **Study again** (re-fetches so the new order uses updated counts). **← Decks** quits (nothing to lose — misses are already saved).
+
 ### Icon handling
 1. If the link has a custom `icon` path → served from `/icons/`
 2. Otherwise → `/api/favicon?url=...` (proxied from `https://www.google.com/s2/favicons?domain=...&sz=64`)
@@ -195,7 +228,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 Cloudflare caches static assets aggressively when the origin sends no `Cache-Control` header. To prevent stale JS/CSS from being served after code changes:
 - `NoCacheMiddleware` adds `Cache-Control: no-store` to every response.
-- Static asset links in `index.html` include a `?v=N` query string (currently `?v=13`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
+- Static asset links in `index.html` include a `?v=N` query string (currently `?v=14`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`, `study-queue.js`, `study.js`, `study.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
 
 ---
 

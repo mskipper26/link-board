@@ -9,7 +9,7 @@ const state = {
   selectedCategories: new Set(),
   dragUrl: null,
   dragOrigin: null,
-  page: "links", // "links" | "habits"
+  page: "links", // "links" | "habits" | "study"
 };
 
 const UNCATEGORIZED = "Uncategorized";
@@ -805,16 +805,23 @@ async function onSave() {
   }
 }
 
-// ─── Pages (Links | Habits) ───────────────────────────────────────────────────
-// Client-side tab swap. The page lives in the URL hash (#habits) so a reload or
-// bookmark lands on it; localStorage covers a bare URL.
+// ─── Pages (Links | Habits | Study) ───────────────────────────────────────────
+// Client-side tab swap. The page lives in the URL hash (#habits, #study) so a
+// reload or bookmark lands on it; localStorage covers a bare URL.
 const PAGE_STORAGE_KEY = "linkBoard.page";
+const PAGES = ["links", "habits", "study"];
+
+function pageFromHash() {
+  const page = location.hash.slice(1);
+  return PAGES.includes(page) ? page : null;
+}
 
 function initialPage() {
-  if (location.hash === "#habits") return "habits";
-  if (location.hash === "#links") return "links";
+  const fromHash = pageFromHash();
+  if (fromHash) return fromHash;
   try {
-    return localStorage.getItem(PAGE_STORAGE_KEY) === "habits" ? "habits" : "links";
+    const saved = localStorage.getItem(PAGE_STORAGE_KEY);
+    return PAGES.includes(saved) ? saved : "links";
   } catch {
     return "links";
   }
@@ -822,27 +829,30 @@ function initialPage() {
 
 function setPage(page) {
   state.page = page;
-  const habits = page === "habits";
   document
     .querySelectorAll(".page-tabs .view-mode-btn")
     .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
   try {
     localStorage.setItem(PAGE_STORAGE_KEY, page);
   } catch {}
-  const hash = habits ? "#habits" : "";
+  const hash = page === "links" ? "" : `#${page}`;
   if (location.hash !== hash) {
     history.replaceState(null, "", location.pathname + location.search + hash);
   }
   // Only touch the content areas once auth has revealed the app.
   if (document.getElementById("appHeader").classList.contains("hidden")) return;
-  document.getElementById("editBtn").classList.toggle("hidden", habits);
-  document.getElementById("addHabitBtn").classList.toggle("hidden", !habits);
-  document.getElementById("viewControls").classList.toggle("hidden", habits);
-  document.getElementById("linkGrid").classList.toggle("hidden", habits);
-  document.getElementById("habitBoard").classList.toggle("hidden", !habits);
+  const show = (id, visible) => document.getElementById(id).classList.toggle("hidden", !visible);
+  show("editBtn", page === "links");
+  show("viewControls", page === "links");
+  show("linkGrid", page === "links");
+  show("addHabitBtn", page === "habits");
+  show("habitBoard", page === "habits");
+  show("addDeckBtn", page === "study");
+  show("studyBoard", page === "study");
   clearTimeout(state.hoverTimeout);
   hidePreview();
-  if (habits) Habits.show();
+  if (page === "habits") Habits.show();
+  if (page === "study") Study.show();
 }
 
 function showApp() {
@@ -864,7 +874,7 @@ async function init() {
     btn.addEventListener("click", () => setPage(btn.dataset.page));
   });
   window.addEventListener("hashchange", () => {
-    const page = location.hash === "#habits" ? "habits" : "links";
+    const page = pageFromHash() || "links";
     if (page !== state.page) setPage(page);
   });
   state.page = initialPage();

@@ -16,6 +16,7 @@ import aiofiles
 from dotenv import load_dotenv
 
 from habit_store import HabitStore, HabitError, atomic_write
+from study_store import StudyStore, StudyError
 
 load_dotenv()
 
@@ -26,6 +27,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 ICONS_DIR.mkdir(exist_ok=True)
 habits = HabitStore(BASE_DIR)
+study = StudyStore(BASE_DIR)
 
 PASSKEY = os.environ["LINK_BOARD_PASSKEY"]
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -216,6 +218,73 @@ async def delete_record(name: str, idx: int, ts: str, request: Request):
     require_auth(request)
     habit_call(habits.delete_record, name, idx, ts)
     return {"ok": True}
+
+
+# ─── Study (flash-card decks) ──────────────────────────────────────────────
+# Thin wrappers over StudyStore; decks are addressed by their stable slug.
+
+def study_call(fn, *args):
+    try:
+        return fn(*args)
+    except StudyError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+
+
+@app.get("/api/decks")
+async def get_decks(request: Request):
+    require_auth(request)
+    return study.all_decks()
+
+
+@app.post("/api/decks")
+async def create_deck(request: Request):
+    require_auth(request)
+    return study_call(study.create, await json_body(request))
+
+
+@app.put("/api/decks/{slug}")
+async def rename_deck(slug: str, request: Request):
+    require_auth(request)
+    return study_call(study.rename, slug, await json_body(request))
+
+
+@app.delete("/api/decks/{slug}")
+async def delete_deck(slug: str, request: Request):
+    require_auth(request)
+    study_call(study.delete, slug)
+    return {"ok": True}
+
+
+@app.post("/api/decks/{slug}/reset")
+async def reset_deck(slug: str, request: Request):
+    require_auth(request)
+    study_call(study.reset_fails, slug)
+    return {"ok": True}
+
+
+@app.post("/api/decks/{slug}/cards")
+async def add_card(slug: str, request: Request):
+    require_auth(request)
+    return study_call(study.add_card, slug, await json_body(request))
+
+
+@app.put("/api/decks/{slug}/cards/{card_id}")
+async def update_card(slug: str, card_id: str, request: Request):
+    require_auth(request)
+    return study_call(study.update_card, slug, card_id, await json_body(request))
+
+
+@app.delete("/api/decks/{slug}/cards/{card_id}")
+async def delete_card(slug: str, card_id: str, request: Request):
+    require_auth(request)
+    study_call(study.delete_card, slug, card_id)
+    return {"ok": True}
+
+
+@app.post("/api/decks/{slug}/cards/{card_id}/fail")
+async def fail_card(slug: str, card_id: str, request: Request):
+    require_auth(request)
+    return study_call(study.record_fail, slug, card_id)
 
 
 @app.get("/api/favicon")

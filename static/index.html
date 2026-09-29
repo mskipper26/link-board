@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Link Board</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/habits.css?v=13">
+  <link rel="stylesheet" href="/static/style.css?v=14">
+  <link rel="stylesheet" href="/static/habits.css?v=14">
+  <link rel="stylesheet" href="/static/study.css?v=14">
 </head>
 <body>
 
@@ -16,6 +17,7 @@
       <div class="view-modes page-tabs" role="tablist">
         <button class="view-mode-btn active" data-page="links" role="tab">Links</button>
         <button class="view-mode-btn" data-page="habits" role="tab">Habits</button>
+        <button class="view-mode-btn" data-page="study" role="tab">Study</button>
       </div>
     </div>
     <div id="quickAccess" class="quick-access hidden">
@@ -24,6 +26,7 @@
     </div>
     <button id="editBtn" class="btn-edit">Edit</button>
     <button id="addHabitBtn" class="btn-edit hidden">+ Add Habit</button>
+    <button id="addDeckBtn" class="btn-edit hidden">+ New Deck</button>
   </header>
 
   <nav id="viewControls" class="view-controls hidden">
@@ -38,6 +41,8 @@
   <main id="linkGrid" class="board hidden"></main>
 
   <main id="habitBoard" class="habit-board hidden"></main>
+
+  <main id="studyBoard" class="study-board hidden"></main>
 
   <datalist id="categoryOptions"></datalist>
 
@@ -96,8 +101,15 @@
     <div class="overlay-panel"></div>
   </div>
 
-  <script src="/static/habit-math.js?v=13"></script>
-  <script src="/static/app.js?v=13"></script>
-  <script src="/static/habits.js?v=13"></script>
+  <!-- Study menus (deck form, card manager) -->
+  <div id="studyOverlay" class="overlay-backdrop hidden">
+    <div class="overlay-panel"></div>
+  </div>
+
+  <script src="/static/habit-math.js?v=14"></script>
+  <script src="/static/app.js?v=14"></script>
+  <script src="/static/habits.js?v=14"></script>
+  <script src="/static/study-queue.js?v=14"></script>
+  <script src="/static/study.js?v=14"></script>
 </body>
 </html>
