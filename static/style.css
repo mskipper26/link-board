@@ -59,6 +59,41 @@ html, body {
   letter-spacing: -0.01em;
 }
 
+/* ─── Quick access bar ───────────────────────────────────────────────────── */
+.quick-access {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  margin-right: 12px;
+  min-width: 0;
+}
+
+.quick-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.quick-links::-webkit-scrollbar { display: none; }
+
+.quick-link {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: background .15s, border-color .15s;
+}
+.quick-link:hover { background: var(--surface-2); border-color: var(--border); }
+.quick-link img { width: 18px; height: 18px; object-fit: contain; }
+
+.quick-open-all { flex: 0 0 auto; padding: 4px 12px; }
+
 /* ─── Buttons ─────────────────────────────────────────────────────────────── */
 .btn-edit {
   background: var(--surface-2);
@@ -334,6 +369,39 @@ html, body {
 .drag-handle svg { width: 16px; height: 16px; fill: currentColor; }
 .card:hover .drag-handle { opacity: 1; }
 
+/* Pin toggle: shown on hover, always shown (accent, filled) when pinned. */
+.pin-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: -8px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, color .15s, background .15s;
+}
+.pin-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.pin-btn:hover { color: var(--text-muted); background: var(--border); }
+.pin-btn.pinned { opacity: 1; color: var(--accent); }
+.pin-btn.pinned svg { fill: currentColor; }
+.card:hover .pin-btn,
+.pin-btn:focus-visible { opacity: 1; }
+@media (hover: none) { .pin-btn { opacity: 1; } }
+
 .card.dragging {
   opacity: 0.4;
   border-color: var(--accent);
@@ -604,6 +672,18 @@ html, body {
   transition: border-color .15s;
   font-family: inherit;
 }
+.edit-quick {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.edit-quick input { accent-color: var(--accent); cursor: pointer; }
+
 .edit-input:focus { border-color: var(--accent); }
 .edit-input::placeholder { color: var(--text-dim); }
 

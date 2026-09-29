@@ -105,11 +105,12 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
     "name": "Example Site",
     "icon": "/icons/example_abc1.png",
     "category": ["Tools", "Personal"],
-    "description": "Up to 200 characters."
+    "description": "Up to 200 characters.",
+    "quickAccess": true
   }
 }
 ```
-All fields are optional. If `name` is absent, the frontend derives it from the URL hostname. If `icon` is absent, the favicon proxy is used at display time. **`category` may be a single string or an array of strings** — a link with multiple categories is sorted into all of them (shown once per section in By Category, and matched by any of them in Filter). The edit overlay accepts categories comma-separated and saves a bare string for one, an array for several. If `category` is absent/empty, the link is treated as `Uncategorized`. **Key order in the JSON is the display order** — the drag-to-reorder feature rewrites the object with keys in the new order.
+All fields are optional. If `name` is absent, the frontend derives it from the URL hostname. If `icon` is absent, the favicon proxy is used at display time. **`category` may be a single string or an array of strings** — a link with multiple categories is sorted into all of them (shown once per section in By Category, and matched by any of them in Filter). The edit overlay accepts categories comma-separated and saves a bare string for one, an array for several. If `category` is absent/empty, the link is treated as `Uncategorized`. `quickAccess: true` puts the link in the header's quick-access bar (toggled by a card's pin button or the "Quick access" checkbox in the edit overlay; omitted when false). **Key order in the JSON is the display order** — the drag-to-reorder feature rewrites the object with keys in the new order.
 
 **Atomic writes**: `atomic_write(path, text)` (in `habit_store.py`) writes to `<name>.tmp` then renames over the target, preventing partial reads. Used for `links.json`, `habits.json`, and CSV rewrites (new records are plain appends).
 
@@ -147,6 +148,9 @@ Header, view controls, and grid start with CSS class `hidden` (`display: none !i
 
 ### Pages (Links | Habits)
 Segmented tabs in the header (`.page-tabs`). `setPage()` swaps `#viewControls`/`#linkGrid`/`#editBtn` (Links) for `#habitBoard`/`#addHabitBtn` (Habits). The page is kept in the URL hash (`#habits`) and `localStorage` (`linkBoard.page`). Habit data is fetched the first time the Habits tab is shown (`Habits.show()`).
+
+### Quick-access bar
+`#quickAccess` in the header (visible on both pages; hidden when no link has `quickAccess: true`). `renderQuickAccess()` (called from `renderGrid()` and after a reorder) draws one small favicon link per flagged link in JSON order — opens in a new tab like a card, no hover preview. Each card has a pin button (`.pin-btn`, left of the drag handle; shown on hover, always shown filled/accent when pinned) → `toggleQuickAccess()` flips the flag, updates every card for that URL plus the bar, and `PUT`s `links.json` (rolls back on failure). The **Open all** button calls `window.open` for each; browsers typically block all but the first unless pop-ups are allowed for the site.
 
 ### View modes
 A controls bar (`#viewControls`) below the header offers three segmented modes (`state.viewMode`):
@@ -191,7 +195,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 Cloudflare caches static assets aggressively when the origin sends no `Cache-Control` header. To prevent stale JS/CSS from being served after code changes:
 - `NoCacheMiddleware` adds `Cache-Control: no-store` to every response.
-- Static asset links in `index.html` include a `?v=N` query string (currently `?v=11`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
+- Static asset links in `index.html` include a `?v=N` query string (currently `?v=13`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
 
 ---
 

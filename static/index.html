@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Link Board</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=11">
-  <link rel="stylesheet" href="/static/habits.css?v=11">
+  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/habits.css?v=13">
 </head>
 <body>
 
@@ -17,6 +17,10 @@
         <button class="view-mode-btn active" data-page="links" role="tab">Links</button>
         <button class="view-mode-btn" data-page="habits" role="tab">Habits</button>
       </div>
+    </div>
+    <div id="quickAccess" class="quick-access hidden">
+      <div id="quickLinks" class="quick-links"></div>
+      <button id="openAllBtn" class="btn-edit quick-open-all" title="Open all quick-access links in new tabs">Open all</button>
     </div>
     <button id="editBtn" class="btn-edit">Edit</button>
     <button id="addHabitBtn" class="btn-edit hidden">+ Add Habit</button>
@@ -92,8 +96,8 @@
     <div class="overlay-panel"></div>
   </div>
 
-  <script src="/static/habit-math.js?v=11"></script>
-  <script src="/static/app.js?v=11"></script>
-  <script src="/static/habits.js?v=11"></script>
+  <script src="/static/habit-math.js?v=13"></script>
+  <script src="/static/app.js?v=13"></script>
+  <script src="/static/habits.js?v=13"></script>
 </body>
 </html>
