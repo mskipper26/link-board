@@ -19,13 +19,15 @@ sys.path.insert(0, str(ROOT))
 
 import main  # noqa: E402
 from habit_store import HabitStore  # noqa: E402
+from study_store import StudyStore  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
 @pytest.fixture
 def base_dir(tmp_path, monkeypatch):
-    """Give each test a fresh habit store."""
+    """Give each test a fresh habit store and deck store."""
     monkeypatch.setattr(main, "habits", HabitStore(tmp_path))
+    monkeypatch.setattr(main, "study", StudyStore(tmp_path))
     return tmp_path
 
 

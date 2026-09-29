@@ -16,3 +16,7 @@ links.json
 habits.json
 /habits/*
 !/habits/.gitkeep
+
+# Flash-card decks (one JSON per deck)
+/decks/*
+!/decks/.gitkeep
