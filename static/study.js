@@ -7,8 +7,8 @@ const Study = (() => {
 
   const ss = {
     loaded: false,
-    decks: [],       // [{slug, name, cards: [{id, front, back, fails}]}], sorted by name
-    session: null,   // {slug, name, q: StudyQueue session, flipped, error}
+    decks: [],       // [{slug, name, cards: [{id, front, back, fails}], session}], sorted by name
+    session: null,   // {slug, name, q: StudyQueue session, started, flipped, error, saving}
     menu: null,      // open overlay: {refresh?}
   };
 
@@ -73,10 +73,23 @@ const Study = (() => {
     el.appendChild(grid);
   }
 
+  // "today", "yesterday", "3 days ago" — for when a saved session began.
+  function daysAgo(iso) {
+    const then = new Date(iso);
+    if (isNaN(then)) return "";
+    const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const n = Math.round((midnight(new Date()) - midnight(then)) / 86400000);
+    return n <= 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`;
+  }
+
   function createDeckTile(d) {
     const tile = document.createElement("section");
     tile.className = "deck-tile";
     const tricky = d.cards.filter((c) => c.fails > 0).length;
+    const saved = d.session && d.cards.length ? d.session : null;
+    const ids = new Set(d.cards.map((c) => c.id));
+    const known = saved ? new Set(saved.known.filter((id) => ids.has(id))).size : 0;
+    const started = saved && saved.started ? daysAgo(saved.started) : "";
     tile.innerHTML = `
       <div class="deck-head">
         <h2 class="deck-name">${esc(d.name)}</h2>
@@ -86,28 +99,71 @@ const Study = (() => {
         <span>${plural(d.cards.length, "card")}</span>
         ${tricky ? `<span class="badge badge-neg" title="Cards you've marked “new to me” at least once — they come first">${tricky} tricky</span>` : ""}
       </div>
+      ${saved ? `<div class="deck-progress">In progress · ${known}/${d.cards.length} known${started ? ` · started ${started}` : ""}</div>` : ""}
       <div class="deck-actions">
-        <button class="btn-primary btn-sm" data-act="study"${d.cards.length ? "" : " disabled"}>Study</button>
+        <button class="btn-primary btn-sm" data-act="study"${d.cards.length ? "" : " disabled"}>${saved ? "Resume" : "Study"}</button>
         <button class="btn-secondary btn-sm" data-act="cards">${d.cards.length ? "Cards" : "+ Add cards"}</button>
+        ${saved ? `<button class="deck-restart" data-act="restart" title="Discard saved progress and start a fresh session">Start over</button>` : ""}
       </div>`;
     tile.querySelector('[data-act="study"]').addEventListener("click", () => startSession(d.slug));
+    const restart = tile.querySelector('[data-act="restart"]');
+    if (restart) {
+      restart.addEventListener("click", () => {
+        if (!confirm(`Discard your progress in “${d.name}” and start over?`)) return;
+        startSession(d.slug, { fresh: true });
+      });
+    }
     tile.querySelector('[data-act="cards"]').addEventListener("click", () => openCards(d.slug));
     tile.querySelector('[data-act="edit"]').addEventListener("click", () => openDeckForm(d.slug));
     return tile;
   }
 
   // ─── Session ────────────────────────────────────────────────────────────────
-  function startSession(slug) {
+  // Resumes the deck's saved session unless `fresh`; a fresh start drops any
+  // saved one. Nothing is saved until the first answer.
+  function startSession(slug, { fresh = false } = {}) {
     const d = deck(slug);
     if (!d || !d.cards.length) return;
-    ss.session = { slug, name: d.name, q: Q.start(d.cards), flipped: false, error: "" };
+    let q = !fresh && d.session ? Q.resume(d.session, d.cards) : null;
+    let started = q ? d.session.started : null;
+    const discard = d.session && (!q || Q.done(q));
+    if (!q || Q.done(q)) {
+      q = Q.start(d.cards);
+      started = new Date().toISOString();
+    }
+    const s = { slug, name: d.name, q, started, flipped: false, error: "", saving: Promise.resolve() };
+    ss.session = s;
+    if (discard) {
+      d.session = null;
+      save(s, () => api(`/api/decks/${enc(slug)}/session`, { method: "DELETE" }));
+    }
     render();
   }
 
-  // Leaving re-fetches so the deck tiles show the updated fail counts.
+  // Saves run one after another so a slow request can't overwrite a newer one.
+  function save(s, fn) {
+    s.saving = s.saving.then(fn).catch((e) => {
+      if (ss.session !== s) return;
+      s.error = `Couldn't save your progress: ${e.message}`;
+      render();
+    });
+  }
+
+  function saveProgress(s) {
+    const path = `/api/decks/${enc(s.slug)}/session`;
+    if (Q.done(s.q)) save(s, () => api(path, { method: "DELETE" }));
+    else {
+      const body = { ...Q.snapshot(s.q), started: s.started };
+      save(s, () => api(path, { method: "PUT", body }));
+    }
+  }
+
+  // Leaving re-fetches (after pending saves) so the deck tiles show the
+  // updated fail counts and saved progress.
   function endSession() {
+    const s = ss.session;
     ss.session = null;
-    refresh().catch(() => render());
+    s.saving.then(refresh).catch(() => render());
   }
 
   function renderSession() {
@@ -116,7 +172,7 @@ const Study = (() => {
     if (Q.done(s.q)) return renderSummary();
     const card = Q.current(s.q);
     const retry = s.q.misses[card.id];
-    const pct = s.q.total ? (s.q.known / s.q.total) * 100 : 0;
+    const pct = s.q.total ? (s.q.known.length / s.q.total) * 100 : 0;
     const retries = s.q.queue.filter((c) => s.q.misses[c.id]).length;
 
     el.innerHTML = `
@@ -124,7 +180,7 @@ const Study = (() => {
         <div class="session-head">
           <button class="btn-secondary btn-sm" data-act="quit">← Decks</button>
           <h2 class="session-title">${esc(s.name)}</h2>
-          <span class="session-count">${s.q.known} / ${s.q.total} known${retries ? ` · ${retries} to retry` : ""}</span>
+          <span class="session-count">${s.q.known.length} / ${s.q.total} known${retries ? ` · ${retries} to retry` : ""}</span>
         </div>
         <div class="session-track"><div class="session-fill" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="flashcard${s.flipped ? " flipped" : ""}" tabindex="0">
@@ -140,7 +196,8 @@ const Study = (() => {
           <div class="fc-side fc-back">
             <div class="fc-label">Back</div>
             <div class="fc-text">${esc(card.back)}</div>
-          </div>` : `<div class="fc-reveal">Click or press Space to show the answer</div>`}
+          </div>
+          <div class="fc-reveal">Click or press Space to hide the answer</div>` : `<div class="fc-reveal">Click or press Space to show the answer</div>`}
         </div>
         <div class="session-actions">
           ${s.flipped ? `
@@ -152,19 +209,18 @@ const Study = (() => {
       </div>`;
 
     el.querySelector('[data-act="quit"]').addEventListener("click", endSession);
-    const fc = el.querySelector(".flashcard");
+    el.querySelector(".flashcard").addEventListener("click", toggleFlip);
     if (!s.flipped) {
-      fc.addEventListener("click", flip);
-      el.querySelector('[data-act="flip"]').addEventListener("click", flip);
+      el.querySelector('[data-act="flip"]').addEventListener("click", toggleFlip);
     } else {
       el.querySelector('[data-act="new"]').addEventListener("click", () => respond(false));
       el.querySelector('[data-act="knew"]').addEventListener("click", () => respond(true));
     }
   }
 
-  function flip() {
-    if (!ss.session || ss.session.flipped) return;
-    ss.session.flipped = true;
+  function toggleFlip() {
+    if (!ss.session || Q.done(ss.session.q)) return;
+    ss.session.flipped = !ss.session.flipped;
     renderSession();
   }
 
@@ -187,6 +243,7 @@ const Study = (() => {
           renderSession();
         });
     }
+    saveProgress(s);
     renderSession();
   }
 
@@ -226,6 +283,7 @@ const Study = (() => {
       const slug = s.slug;
       ss.session = null;
       try {
+        await s.saving;
         await load();
       } catch {}
       if (deck(slug)?.cards.length) startSession(slug);
@@ -502,16 +560,16 @@ const Study = (() => {
         if (isMenuOpen()) closeMenu();
         return;
       }
-      // Session shortcuts: Space/Enter flip, 1/← new, 2/→ knew.
+      // Session shortcuts: Space/Enter flip either way, 1/← new, 2/→ knew.
       if (!ss.session || !isShown() || isMenuOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.target.closest && e.target.closest("input, textarea, select, button")) {
         // Let buttons handle their own Space/Enter; other keys still count.
         if (e.key === " " || e.key === "Enter") return;
       }
       const s = ss.session;
-      if (!s.flipped && (e.key === " " || e.key === "Enter")) {
+      if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
-        flip();
+        toggleFlip();
       } else if (s.flipped && (e.key === "1" || e.key === "ArrowLeft")) {
         e.preventDefault();
         respond(false);

@@ -8,6 +8,9 @@ The slug is assigned once, on create, and never changes (renaming only edits
 "name"), so it doubles as the deck's id in URLs. Card ids are random hex,
 stable across edits. `fails` counts every time the card was marked "new to
 me" during study; it only goes back to 0 via an explicit reset.
+
+An optional "session" key holds the in-progress study session as card ids
+({"queue", "known", "misses", "started"}) so it can be resumed later.
 """
 
 import json
@@ -58,6 +61,38 @@ def validate_card_text(body) -> dict:
         "front": _clean_text(body.get("front"), "Front", MAX_SIDE_LEN),
         "back": _clean_text(body.get("back"), "Back", MAX_SIDE_LEN),
     }
+
+
+def validate_session(body, deck: dict) -> dict:
+    """An in-progress study session, reduced to cards the deck still has.
+
+    Unknown ids are dropped silently (a card may have been deleted in another
+    tab mid-session); a card marked known is never also queued.
+    """
+    if not isinstance(body, dict):
+        bad("session must be an object")
+    ids = {c.get("id") for c in deck["cards"]}
+
+    def id_list(field):
+        value = body.get(field, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            bad(f"{field} must be a list of card ids")
+        return list(dict.fromkeys(v for v in value if v in ids))
+
+    known = id_list("known")
+    queue = [i for i in id_list("queue") if i not in known]
+    misses = body.get("misses", {})
+    if not isinstance(misses, dict) or not all(
+        isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in misses.values()
+    ):
+        bad("misses must map card ids to positive counts")
+    session = {"queue": queue, "known": known, "misses": {k: n for k, n in misses.items() if k in ids}}
+    started = body.get("started")
+    if started is not None:
+        if not isinstance(started, str) or len(started) > 40:
+            bad("started must be a short timestamp string")
+        session["started"] = started
+    return session
 
 
 class StudyStore:
@@ -114,8 +149,11 @@ class StudyStore:
 
     # decks -------------------------------------------------------------
     def all_decks(self) -> list:
-        """Every deck, sorted by name: [{slug, name, cards}]."""
-        decks = [{"slug": s, "name": d.get("name") or s, "cards": d["cards"]} for s, d in self._all().items()]
+        """Every deck, sorted by name: [{slug, name, cards, session}]."""
+        decks = [
+            {"slug": s, "name": d.get("name") or s, "cards": d["cards"], "session": d.get("session")}
+            for s, d in self._all().items()
+        ]
         return sorted(decks, key=lambda d: d["name"].lower())
 
     def create(self, body) -> dict:
@@ -153,6 +191,18 @@ class StudyStore:
         for card in deck["cards"]:
             card["fails"] = 0
         self._save(slug, deck)
+
+    # study session -----------------------------------------------------
+    def save_session(self, slug: str, body) -> dict:
+        deck = self._load(slug)
+        deck["session"] = validate_session(body, deck)
+        self._save(slug, deck)
+        return deck["session"]
+
+    def clear_session(self, slug: str):
+        deck = self._load(slug)
+        if deck.pop("session", None) is not None:
+            self._save(slug, deck)
 
     # cards -------------------------------------------------------------
     def add_card(self, slug: str, body) -> dict:

@@ -262,6 +262,19 @@ async def reset_deck(slug: str, request: Request):
     return {"ok": True}
 
 
+@app.put("/api/decks/{slug}/session")
+async def save_session(slug: str, request: Request):
+    require_auth(request)
+    return study_call(study.save_session, slug, await json_body(request))
+
+
+@app.delete("/api/decks/{slug}/session")
+async def clear_session(slug: str, request: Request):
+    require_auth(request)
+    study_call(study.clear_session, slug)
+    return {"ok": True}
+
+
 @app.post("/api/decks/{slug}/cards")
 async def add_card(slug: str, request: Request):
     require_auth(request)

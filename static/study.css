@@ -35,7 +35,18 @@
 .deck-head .icon-btn { flex-shrink: 0; margin: -2px -6px 0 0; }
 
 .deck-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
-.deck-actions { display: flex; gap: 6px; margin-top: auto; }
+.deck-progress { font-size: 12px; color: var(--accent); }
+.deck-actions { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+.deck-restart {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.deck-restart:hover { color: var(--text); text-decoration: underline; }
 .deck-actions .btn-primary.btn-sm { padding: 4px 14px; }
 
 /* ─── Session ─────────────────────────────────────────────────────────────── */
@@ -68,7 +79,6 @@
   cursor: pointer;
   outline: none;
 }
-.flashcard.flipped { cursor: default; }
 .flashcard:focus-visible { border-color: var(--accent); }
 
 .fc-tags { position: absolute; top: 12px; right: 14px; display: flex; gap: 8px; align-items: center; }
