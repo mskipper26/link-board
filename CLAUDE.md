@@ -87,7 +87,7 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
 | POST | `/api/habits/{name}/records` | ✓ | Add `{ts, values, replace?}`; daily habit + day taken → 409 unless `replace` |
 | PUT | `/api/habits/{name}/records/{idx}` | ✓ | Edit record by CSV row index; body `expectedTs` must match (else 409) |
 | DELETE | `/api/habits/{name}/records/{idx}?ts=` | ✓ | Delete record; `ts` must match (else 409) |
-| GET | `/api/decks` | ✓ | `[{slug, name, cards: [{id, front, back, fails}]}]`, sorted by name |
+| GET | `/api/decks` | ✓ | `[{slug, name, cards: [{id, front, back, fails}], session}]`, sorted by name (`session` null when none saved) |
 | POST | `/api/decks` | ✓ | Create deck `{name}` → `{slug, name}` |
 | PUT | `/api/decks/{slug}` | ✓ | Rename `{name}` (slug/file unchanged) |
 | DELETE | `/api/decks/{slug}` | ✓ | Deck file → `decks/.trash/<slug>-<stamp>.json` |
@@ -96,6 +96,8 @@ All endpoints return `Cache-Control: no-store` (applied by `NoCacheMiddleware`) 
 | PUT | `/api/decks/{slug}/cards/{id}` | ✓ | Edit `{front, back}` (keeps `fails`) |
 | DELETE | `/api/decks/{slug}/cards/{id}` | ✓ | Remove card |
 | POST | `/api/decks/{slug}/cards/{id}/fail` | ✓ | `fails += 1` server-side → `{fails}` |
+| PUT | `/api/decks/{slug}/session` | ✓ | Save in-progress session `{queue, known, misses, started?}` (unknown card ids dropped) → stored session |
+| DELETE | `/api/decks/{slug}/session` | ✓ | Clear the saved session (idempotent) |
 | GET | `/api/favicon?url=` | — | Proxies favicon from Google's favicon service |
 | GET | `/api/preview?url=` | — | Fetches OG metadata (title, description, og:image) from a URL |
 | GET | `/icons/{filename}` | — | Serves uploaded icons (StaticFiles mount) |
@@ -161,11 +163,18 @@ All fields are optional. If `name` is absent, the frontend derives it from the U
   "name": "Spanish Verbs",
   "cards": [
     {"id": "8dbe4148", "front": "hablar", "back": "to speak", "fails": 2}
-  ]
+  ],
+  "session": {
+    "queue": ["8dbe4148"],
+    "known": ["a1b2c3d4"],
+    "misses": {"8dbe4148": 1},
+    "started": "2026-09-30T18:02:00.000Z"
+  }
 }
 ```
 - Deck `name` unique case-insensitively, ≤60 chars. The slug (filename) is assigned on create (numeric suffix on collision, `deck` if the name has no ASCII letters/digits) and **never changes** — rename only edits `name` — so it is the deck's id in URLs. URL slugs must match `^[a-z0-9]+(-[a-z0-9]+)*$` (else 404).
 - Card `front`/`back` required, ≤2000 chars, stored trimmed. `fails` = times marked “new to me”; only increases (via `/fail`), except for an explicit reset.
+- Optional `session` = the in-progress study session, as card ids: `queue` (not yet known, front = current card), `known` (marked “Knew it”), `misses` (id → times “new” this session), `started`. Total is derived (`known + queue`), so a deleted card simply drops out. Card edits, rename and reset leave it alone; deleting the deck trashes it with the file.
 
 ---
 
@@ -215,7 +224,8 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 ### Study page (`study.js`, ordering in `study-queue.js`)
 - **Deck grid** (`.deck-tile`, same grid as link cards): name, card count, “N tricky” badge (cards with `fails > 0`), **Study** / **Cards** buttons, ✎ (rename/delete). Creating a deck opens its card manager straight away.
 - **Card manager** (`#studyOverlay`, reuses the habit menu classes): Front/Back textareas + “Add card” (Ctrl+Enter), card list with fail count, inline ✎ edit (Escape cancels the edit only) and ✕ remove, footer “Reset fail counts”.
-- **Session** (rendered in `#studyBoard`, kept in memory across tab switches): `StudyQueue.start()` orders every card by `fails` desc, ties shuffled. Show front → flip (click / Space / Enter) → **New to me** (1 / ←) or **Knew it** (2 / →). “Knew” removes the card; “new” `POST`s `/fail` in the background and sends it to the back of the queue. Ends when every card is known → summary of this session's misses, **Study again** (re-fetches so the new order uses updated counts). **← Decks** quits (nothing to lose — misses are already saved).
+- **Session** (rendered in `#studyBoard`, kept in memory across tab switches): `StudyQueue.start()` orders every card by `fails` desc, ties shuffled. Show front → flip (click / Space / Enter; the same toggles back to the front) → **New to me** (1 / ←) or **Knew it** (2 / →). “Knew” removes the card; “new” `POST`s `/fail` in the background and sends it to the back of the queue. Ends when every card is known → summary of this session's misses, **Study again** (re-fetches so the new order uses updated counts). **← Decks** leaves; progress is kept.
+- **Resume**: after every answer the session is saved (`StudyQueue.snapshot()` → `PUT …/session`; saves are chained so they land in order; finishing `DELETE`s it). Nothing is saved before the first answer. A deck with a saved session shows “In progress · N/M known · started …” with **Resume** and **Start over** (confirm; discards it). `StudyQueue.resume()` rebuilds against the current cards: deleted cards drop out, edits show the latest text, cards added since go to the back. Resuming always shows the current card's front; the Study tab never auto-reopens a session.
 
 ### Icon handling
 1. If the link has a custom `icon` path → served from `/icons/`
@@ -228,7 +238,7 @@ Triggered after 400 ms on mouseenter. Calls `GET /api/preview?url=...` (results 
 
 Cloudflare caches static assets aggressively when the origin sends no `Cache-Control` header. To prevent stale JS/CSS from being served after code changes:
 - `NoCacheMiddleware` adds `Cache-Control: no-store` to every response.
-- Static asset links in `index.html` include a `?v=N` query string (currently `?v=14`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`, `study-queue.js`, `study.js`, `study.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
+- Static asset links in `index.html` include a `?v=N` query string (currently `?v=15`). **Increment this (on every asset, including `habit-math.js`, `habits.js`, `habits.css`, `study-queue.js`, `study.js`, `study.css`) any time any of them is updated** to force a Cloudflare cache miss for clients that may have an older version cached.
 
 ---
 

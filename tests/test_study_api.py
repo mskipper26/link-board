@@ -37,6 +37,8 @@ def on_disk(base_dir, slug):
     ("put", "/api/decks/x/cards/abc"),
     ("delete", "/api/decks/x/cards/abc"),
     ("post", "/api/decks/x/cards/abc/fail"),
+    ("put", "/api/decks/x/session"),
+    ("delete", "/api/decks/x/session"),
 ])
 def test_requires_auth(anon, method, path):
     assert getattr(anon, method)(path).status_code == 401
@@ -46,7 +48,7 @@ def test_requires_auth(anon, method, path):
 
 def test_create_and_list(client, base_dir):
     assert make_deck(client, "Spanish Verbs") == "spanish-verbs"
-    assert decks(client) == [{"slug": "spanish-verbs", "name": "Spanish Verbs", "cards": []}]
+    assert decks(client) == [{"slug": "spanish-verbs", "name": "Spanish Verbs", "cards": [], "session": None}]
     assert on_disk(base_dir, "spanish-verbs") == {"name": "Spanish Verbs", "cards": []}
 
 
@@ -168,3 +170,76 @@ def test_fail_increments_and_reset(client):
 def test_fail_unknown_card_404(client):
     slug = make_deck(client)
     assert client.post(f"/api/decks/{slug}/cards/deadbeef/fail").status_code == 404
+
+
+# ─── study session ──────────────────────────────────────────────────────────
+
+def put_session(client, slug, body):
+    return client.put(f"/api/decks/{slug}/session", json=body)
+
+
+def test_session_save_and_list(client, base_dir):
+    slug = make_deck(client)
+    a, b, c = (add(client, slug, x)["id"] for x in "abc")
+    body = {"queue": [b, c], "known": [a], "misses": {b: 2}, "started": "2026-09-30T14:02:00-04:00"}
+    r = put_session(client, slug, body)
+    assert r.status_code == 200 and r.json() == body
+    assert on_disk(base_dir, slug)["session"] == body
+    assert decks(client)[0]["session"] == body
+
+
+def test_session_drops_unknown_and_duplicate_ids(client):
+    slug = make_deck(client)
+    a, b = (add(client, slug, x)["id"] for x in "ab")
+    r = put_session(client, slug, {"queue": [a, "gone", b, b], "known": [a, "gone"], "misses": {"gone": 1, b: 1}})
+    assert r.json() == {"queue": [b], "known": [a], "misses": {b: 1}}
+
+
+@pytest.mark.parametrize("body", [
+    [],
+    {"queue": "abc"},
+    {"known": [1]},
+    {"misses": []},
+    {"misses": {"x": 0}},
+    {"misses": {"x": True}},
+    {"started": 5},
+    {"started": "x" * 41},
+])
+def test_session_validation(client, body):
+    slug = make_deck(client)
+    assert put_session(client, slug, body).status_code == 400
+
+
+def test_session_unknown_deck_404(client):
+    assert put_session(client, "nope", {}).status_code == 404
+    assert client.delete("/api/decks/nope/session").status_code == 404
+
+
+def test_session_clear_is_idempotent(client, base_dir):
+    slug = make_deck(client)
+    a = add(client, slug)["id"]
+    put_session(client, slug, {"queue": [a]})
+    for _ in range(2):
+        assert client.delete(f"/api/decks/{slug}/session").status_code == 200
+        assert "session" not in on_disk(base_dir, slug)
+
+
+def test_session_survives_deck_and_card_changes(client, base_dir):
+    slug = make_deck(client)
+    a, b = (add(client, slug, x)["id"] for x in "ab")
+    put_session(client, slug, {"queue": [a, b]})
+    client.put(f"/api/decks/{slug}", json={"name": "Renamed"})
+    client.post(f"/api/decks/{slug}/reset")
+    client.post(f"/api/decks/{slug}/cards/{a}/fail")
+    client.put(f"/api/decks/{slug}/cards/{a}", json={"front": "x", "back": "y"})
+    add(client, slug, "c")
+    assert on_disk(base_dir, slug)["session"] == {"queue": [a, b], "known": [], "misses": {}}
+
+
+def test_session_trashed_with_deck(client, base_dir):
+    slug = make_deck(client)
+    a = add(client, slug)["id"]
+    put_session(client, slug, {"queue": [a]})
+    client.delete(f"/api/decks/{slug}")
+    trashed = next((base_dir / "decks" / ".trash").glob(f"{slug}-*.json"))
+    assert json.loads(trashed.read_text())["session"]["queue"] == [a]
